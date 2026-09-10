@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="./vendor/gentelella/main-v4-pXJJcGAu.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./layout-fixes.css" />
+    <link rel="stylesheet" href="./executive-upgrade.css" />
   </head>
   <body data-shell="admin" data-page="dashboard" data-view="territorio">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -80,7 +81,9 @@
       <section class="territory-layout">
         <article class="card panel map-panel">
           <div class="panel-header"><div><p class="eyebrow">DISTRIBUCIÓN TERRITORIAL</p><h2>Concentración por zona</h2></div><div class="map-controls"><label>Especie<select id="speciesSelect" aria-label="Seleccionar especie"></select></label><label>Departamento<select id="departmentSelect" aria-label="Filtrar por departamento"></select></label></div></div>
-          <div class="map-canvas-wrap"><svg id="territoryMap" viewBox="0 0 800 620" role="img" aria-label="Mapa de Corrientes con concentración territorial"><g id="mapGrid"></g><path id="provinceShape"></path><g id="mapPoints"></g></svg><div id="mapTooltip" class="map-tooltip" hidden></div><div class="map-legend"><span class="legend-dot small"></span>Menor concentración <span class="legend-dot large"></span>Mayor concentración</div></div>
+          <div class="map-action-bar" aria-label="Herramientas del mapa"><p id="selectionStatus" class="selection-status">Modo consulta · active la selección para delimitar un área.</p><div class="map-action-buttons"><button id="drawAreaButton" class="map-tool-button primary" type="button">Dibujar área</button><button id="finishAreaButton" class="map-tool-button" type="button" hidden>Finalizar área</button><button id="clearAreaButton" class="map-tool-button" type="button" hidden>Limpiar</button><button id="resetMapViewButton" class="map-tool-button" type="button">Restablecer vista</button></div></div>
+          <div class="map-canvas-wrap"><svg id="territoryMap" viewBox="0 0 800 620" role="img" aria-label="Mapa de Corrientes con concentración territorial"><g id="mapGrid"></g><path id="provinceShape"></path><g id="selectionLayer"></g><g id="mapPoints"></g></svg><div id="mapTooltip" class="map-tooltip" hidden></div><div class="map-legend"><span class="legend-dot small"></span>Menor concentración <span class="legend-dot large"></span>Mayor concentración</div></div>
+          <section id="selectionInsight" class="selection-insight" aria-live="polite"><div><p class="eyebrow">ÁREA DE CONSULTA</p><h3>Delimite un polígono sobre el mapa</h3><p>Los resultados se calculan sobre grillas territoriales agregadas, no sobre ubicaciones exactas de establecimientos.</p></div></section>
           <footer class="map-footer"><span>Grillas de aprox. 0,12°; se excluyen coordenadas exactas para preservar confidencialidad.</span><span id="selectedSummary">—</span></footer>
         </article>
         <aside class="card panel focus-panel"><div class="panel-header"><div><p class="eyebrow">FOCOS PRIORITARIOS</p><h2>Zonas a observar</h2></div></div><div id="focusList" class="focus-list" aria-live="polite"></div><div class="panel-footnote">Ordenado por existencias de la especie seleccionada.</div></aside>
