@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07151d" />
+    <meta name="description" content="Panel territorial de existencias ganaderas de Corrientes." />
+    <title>SENASA · Ganadería Corrientes</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-view="territorio">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegación principal">
+        <div class="brand"><span class="brand-mark">S</span><span><strong>SENASA</strong><small>Corrientes</small></span></div>
+        <div class="nav-section"><span>VISTAS</span>
+          <a class="nav-link active" href="./index.html"><span class="nav-icon">⌖</span>Territorio</a>
+          <a class="nav-link" href="./analisis.html"><span class="nav-icon">◫</span>Análisis</a>
+        </div>
+        <div class="sidebar-note">
+          <span class="eyebrow">COBERTURA</span>
+          <strong id="sidebarRecords">—</strong>
+          <span>registros procesados</span>
+        </div>
+        <div class="data-status"><span class="status-dot"></span>Base agregada · uso interno</div>
+      </aside>
+      <div class="page-wrap">
+        <header class="topbar">
+          <div class="breadcrumb">SENASA / Ganadería / <strong>Territorio</strong></div>
+          <div class="topbar-actions"><span class="internal-badge">USO EJECUTIVO</span><button class="icon-button" id="infoButton" aria-label="Ver información de la fuente">i</button></div>
+        </header>
+        <main id="main" class="main-content">
+          <section class="page-heading">
+            <div><p class="eyebrow">CORRIENTES · EXISTENCIAS GANADERAS</p><h1>Mapa territorial</h1><p class="lede">Localice concentración de existencias por zona, especie y departamento.</p></div>
+            <div class="source-chip"><span class="status-dot"></span><span id="updateText">Cargando base…</span></div>
+          </section>
+          <section class="metric-grid" aria-label="Indicadores principales">
+            <article class="metric-card"><span>REGISTROS</span><strong id="metricRecords">—</strong><small id="metricMapped">— georreferenciados</small></article>
+            <article class="metric-card featured"><span>BOVINOS</span><strong id="metricBovinos">—</strong><small id="metricDensity">— cabezas / registro</small></article>
+            <article class="metric-card"><span>RELEVANCIA TOP 5</span><strong id="metricConcentration">—</strong><small>del stock bovino</small></article>
+            <article class="metric-card"><span>GRILLAS ACTIVAS</span><strong id="metricGrids">—</strong><small>aprox. 13 km por celda</small></article>
+          </section>
+          <section class="territory-layout">
+            <article class="panel map-panel">
+              <div class="panel-header"><div><p class="eyebrow">DISTRIBUCIÓN TERRITORIAL</p><h2>Concentración por zona</h2></div><div class="map-controls"><label>Especie<select id="speciesSelect" aria-label="Seleccionar especie"></select></label><label>Departamento<select id="departmentSelect" aria-label="Filtrar por departamento"></select></label></div></div>
+              <div class="map-canvas-wrap"><svg id="territoryMap" viewBox="0 0 800 620" role="img" aria-label="Mapa de Corrientes con concentración territorial"><g id="mapGrid"></g><path id="provinceShape"></path><g id="mapPoints"></g></svg><div id="mapTooltip" class="map-tooltip" hidden></div><div class="map-legend"><span class="legend-dot small"></span>Menor concentración <span class="legend-dot large"></span>Mayor concentración</div></div>
+              <footer class="map-footer"><span>Grillas de aprox. 0,12°; se excluyen coordenadas exactas para preservar confidencialidad.</span><span id="selectedSummary">—</span></footer>
+            </article>
+            <aside class="panel focus-panel"><div class="panel-header"><div><p class="eyebrow">FOCOS PRIORITARIOS</p><h2>Zonas a observar</h2></div></div><div id="focusList" class="focus-list" aria-live="polite"></div><div class="panel-footnote">Ordenado por existencias de la especie seleccionada.</div></aside>
+          </section>
+          <section class="panel table-panel"><div class="panel-header"><div><p class="eyebrow">DETALLE OPERATIVO</p><h2>Municipios y oficinas locales</h2></div><div class="table-summary" id="tableSummary">—</div></div><div class="table-scroll"><table><thead><tr><th>Municipio</th><th>Departamento</th><th>Oficina local</th><th>Registros</th><th class="numeric">Bovinos</th><th class="numeric">Bubalinos</th><th class="numeric">Ovinos</th></tr></thead><tbody id="municipalityRows"></tbody></table></div></section>
+        </main>
+      </div>
+    </div>
+    <dialog id="infoDialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">NOTA METODOLÓGICA</p><h2>Datos territoriales para gestión</h2><p id="sourceInfo">—</p><p>Esta vista no incluye datos personales, contactos, identificadores ni ubicación exacta de predios. Los indicadores económicos se encuentran en la vista de Análisis y requieren supuestos explícitos.</p></dialog>
+    <script src="./app.js"></script>
+  </body>
+</html>
