@@ -13,6 +13,7 @@
   const setText = (selector, value) => { const el = $(selector); if (el) el.textContent = value; };
   const value = (item, key) => Number(item?.[key] || 0);
 
+  setupNavigation();
   fetch("./data/senasa-corrientes.json")
     .then((response) => { if (!response.ok) throw new Error("No se pudo leer la base agregada."); return response.json(); })
     .then(init)
@@ -20,6 +21,21 @@
       document.querySelectorAll(".panel").forEach((panel) => panel.insertAdjacentHTML("beforeend", `<p class="error-state">${error.message}</p>`));
       console.error(error);
     });
+
+  function setupNavigation() {
+    const sidebar = $("#sidebar");
+    const toggle = $(".sidebar-toggle");
+    if (!sidebar || !toggle) return;
+    const close = () => {
+      sidebar.classList.remove("senasa-sidebar-open");
+      toggle.setAttribute("aria-expanded", "false");
+    };
+    toggle.addEventListener("click", () => {
+      const open = sidebar.classList.toggle("senasa-sidebar-open");
+      toggle.setAttribute("aria-expanded", String(open));
+    });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+  }
 
   function init(data) {
     setupCommon(data);
