@@ -1,0 +1,47 @@
+/* La navegación se comporta como un cajón y nunca ocupa el área de trabajo. */
+.sidebar{
+  box-shadow:20px 0 48px rgba(0,0,0,.42);
+  transform:translateX(-100%) !important;
+  transition:transform .22s cubic-bezier(.2,0,0,1) !important;
+  will-change:transform;
+}
+
+.sidebar.senasa-sidebar-open{transform:translateX(0) !important}
+
+.topbar{
+  position:sticky !important;
+  top:0;
+  left:0 !important;
+  right:0;
+  z-index:90;
+}
+
+.senasa-main{
+  margin-left:0 !important;
+  min-height:calc(100vh - 56px);
+  padding:0 !important;
+}
+
+.senasa-footer{margin-left:0 !important}
+.sidebar-toggle{display:flex !important}
+
+.senasa-sidebar-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:95;
+  border:0;
+  background:rgba(5,13,23,.58);
+  cursor:pointer;
+}
+
+body.senasa-nav-open{overflow:hidden}
+
+@media (min-width:721px){
+  .topbar{padding-left:24px}
+  .main-content{padding:32px 34px 34px}
+}
+
+@media (max-width:720px){
+  .topbar{position:sticky !important}
+  .senasa-main{padding:0 !important}
+}

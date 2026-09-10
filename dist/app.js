@@ -26,15 +26,28 @@
     const sidebar = $("#sidebar");
     const toggle = $(".sidebar-toggle");
     if (!sidebar || !toggle) return;
-    const close = () => {
-      sidebar.classList.remove("senasa-sidebar-open");
-      toggle.setAttribute("aria-expanded", "false");
-    };
-    toggle.addEventListener("click", () => {
-      const open = sidebar.classList.toggle("senasa-sidebar-open");
+    const backdrop = document.createElement("button");
+    backdrop.type = "button";
+    backdrop.className = "senasa-sidebar-backdrop";
+    backdrop.setAttribute("aria-label", "Cerrar menú de navegación");
+    backdrop.hidden = true;
+    document.body.append(backdrop);
+    const setOpen = (open) => {
+      sidebar.classList.toggle("senasa-sidebar-open", open);
+      sidebar.inert = !open;
+      sidebar.setAttribute("aria-hidden", String(!open));
       toggle.setAttribute("aria-expanded", String(open));
+      backdrop.hidden = !open;
+      document.body.classList.toggle("senasa-nav-open", open);
+    };
+    const close = () => setOpen(false);
+    toggle.addEventListener("click", () => {
+      setOpen(!sidebar.classList.contains("senasa-sidebar-open"));
     });
+    backdrop.addEventListener("click", close);
+    sidebar.querySelectorAll("a").forEach((link) => link.addEventListener("click", close));
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+    setOpen(false);
   }
 
   function init(data) {
