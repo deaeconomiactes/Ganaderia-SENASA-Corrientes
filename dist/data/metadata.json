@@ -1,0 +1,10 @@
+{
+  "fuente": "Existencia Corrientes 7-9.xlsx",
+  "provincia": "Corrientes",
+  "fecha_corte": null,
+  "actualizado": "2026-09-11T13:37:16Z",
+  "alcance": "Existencias registradas en la base provista; el período no se especifica en el archivo.",
+  "nivel_agregacion": "Provincia, departamento, municipio/oficina local y grilla territorial de aproximadamente 0,12°.",
+  "min_registros_publicos": 5,
+  "privacidad": "Datos agregados. No se muestran datos personales, coordenadas exactas ni información individual de productores."
+}

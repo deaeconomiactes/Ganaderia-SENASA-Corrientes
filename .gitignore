@@ -13,7 +13,7 @@
 # testing
 /coverage
 
-# next.js
+# next.js / vinext
 /.next/
 /.vinext/
 /out/
@@ -42,3 +42,12 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# public-data safeguards
+*.xlsx
+__pycache__/
+node_modules/
+.sites-runtime/
+.wrangler/
+dist/**/*.map
+dist/.openai/

@@ -14,6 +14,10 @@ SOURCE = Path(sys.argv[1]).resolve()
 OUTPUT = Path(sys.argv[2]).resolve()
 SPECIES = ("BOVINOS", "BUBALINOS", "EQUINOS", "PORCINOS", "CAPRINOS", "OVINOS")
 GRID_SIZE = 0.12
+# Public releases must not expose territorial cells represented by fewer than
+# this many source records. Apply this before serializing the public snapshot;
+# hiding cells only in the browser would still leave them downloadable.
+MIN_RECORDS_PUBLIC_CELL = 5
 
 
 def clean_text(value):
@@ -118,9 +122,6 @@ def main():
         cell["municipios"][municipality] += 1
         add_animals(cell, row, columns)
 
-    department_rows = [make_row(name, values) for name, values in departments.items()]
-    department_rows.sort(key=lambda item: item["bovinos"], reverse=True)
-
     municipality_rows = []
     for (department, municipality, office), values in municipalities.items():
         item = make_row(municipality, values)
@@ -139,9 +140,41 @@ def main():
         grid_rows.append(item)
     grid_rows.sort(key=lambda item: item["bovinos"], reverse=True)
 
+    # Suppress small territorial groups in the data artifact itself.  The
+    # source-level dictionaries remain local to this build and are never
+    # serialized, so identifiers and suppressed group values cannot reach the
+    # static site.
+    municipality_rows = [item for item in municipality_rows if item["registros"] >= MIN_RECORDS_PUBLIC_CELL]
+    grid_rows = [item for item in grid_rows if item["registros"] >= MIN_RECORDS_PUBLIC_CELL]
+
+    # Derive every published department total from the already-suppressed
+    # municipality-office rows. This keeps public KPIs, rankings and detail
+    # tables on one consistent population rather than leaking suppressed
+    # values through provincial or departmental totals.
+    public_departments = defaultdict(lambda: defaultdict(int))
+    public_totals = defaultdict(int)
+    for item in municipality_rows:
+        department_values = public_departments[item["departamento"]]
+        department_values["registros"] += item["registros"]
+        public_totals["registros"] += item["registros"]
+        for species in SPECIES:
+            key = species.lower()
+            department_values[key] += item[key]
+            public_totals[key] += item[key]
+
+    department_rows = [make_row(name, values) for name, values in public_departments.items()]
+    department_rows = [item for item in department_rows if item["registros"] >= MIN_RECORDS_PUBLIC_CELL]
+    department_rows.sort(key=lambda item: item["bovinos"], reverse=True)
+
+    suppressed_counts = {
+        "departamentos": len(departments) - len(department_rows),
+        "municipios_oficinas": sum(item["registros"] < MIN_RECORDS_PUBLIC_CELL for item in municipalities.values()),
+        "grillas": sum(item["registros"] < MIN_RECORDS_PUBLIC_CELL for item in grids.values()),
+    }
     top_five = sum(item["bovinos"] for item in department_rows[:5])
-    bovine_total = totals["bovinos"]
-    total_animals = sum(totals[species.lower()] for species in SPECIES)
+    public_records = public_totals["registros"]
+    bovine_total = public_totals["bovinos"]
+    total_animals = sum(public_totals[species.lower()] for species in SPECIES)
 
     payload = {
         "metadata": {
@@ -149,15 +182,16 @@ def main():
             "actualizado": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "alcance": "Existencias registradas en la base provista; el período no se especifica en el archivo.",
             "privacidad": "Datos agregados territorialmente. Se excluyeron titular, CUIT, documento, teléfonos, correos, establecimiento, RENSPA y coordenadas exactas.",
+            "min_registros_publicos": MIN_RECORDS_PUBLIC_CELL,
+            "conteos_suprimidos": suppressed_counts,
+            "universo_totales_publicos": "Los totales y KPIs se calculan sólo sobre unidades publicadas tras la supresión; no permiten inferir existencias de unidades suprimidas.",
             "geometria": "Límite provincial: API Georef / Instituto Geográfico Nacional.",
         },
         "totales": {
-            "registros": records,
-            "registros_georreferenciados": valid_coordinates,
-            "registros_sin_coordenada_valida": invalid_coordinates,
+            "registros": public_records,
             "animales": total_animals,
-            **{species.lower(): totals[species.lower()] for species in SPECIES},
-            "bovinos_por_registro": round(bovine_total / records, 1) if records else 0,
+            **{species.lower(): public_totals[species.lower()] for species in SPECIES},
+            "bovinos_por_registro": round(bovine_total / public_records, 1) if public_records else 0,
             "concentracion_top5_bovinos": round(top_five / bovine_total * 100, 1) if bovine_total else 0,
         },
         "departamentos": department_rows,

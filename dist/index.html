@@ -60,9 +60,16 @@
         <nav class="breadcrumb" aria-label="Miga de pan"><span>SENASA</span><span class="sep" aria-hidden="true">›</span><span>Ganadería</span><span class="sep" aria-hidden="true">›</span><span class="current" aria-current="page">Territorio</span></nav>
       </div>
       <div class="topbar-right">
-        <form id="renspaSearchForm" class="renspa-search" role="search">
-          <label class="sr-only" for="renspaSearchInput">Consultar RENSPA</label>
-          <input id="renspaSearchInput" name="renspa" inputmode="numeric" autocomplete="off" placeholder="Consultar RENSPA" />
+        <form id="locatorForm" class="renspa-search" role="search" aria-label="Localizador protegido">
+          <label class="sr-only" for="locatorType">Tipo de identificador</label>
+          <select id="locatorType" aria-label="Tipo de identificador">
+            <option value="auto">Auto-detectar</option>
+            <option value="renspa">RENSPA</option>
+            <option value="dni">DNI</option>
+            <option value="cuit_cuil">CUIT/CUIL</option>
+          </select>
+          <label class="sr-only" for="locatorInput">Valor del identificador</label>
+          <input id="locatorInput" name="identifier" inputmode="text" autocomplete="off" placeholder="Localizador protegido" />
           <button type="submit">Consultar</button>
         </form>
         <span class="senasa-public-badge"><span class="status-dot"></span>Solo lectura</span>
@@ -78,11 +85,24 @@
         </div>
         <div class="source-chip"><span class="status-dot"></span><span id="updateText">Cargando base…</span></div>
       </section>
+      <section class="traceability-band" aria-label="Banda de trazabilidad">
+        <div><span>Fuente de datos</span><strong id="traceSource">—</strong></div>
+        <div><span>Provincia</span><strong id="traceProvince">Corrientes</strong></div>
+        <div><span>Fecha de corte</span><strong id="traceCutoff">—</strong></div>
+        <div><span>Última actualización</span><strong id="traceUpdated">—</strong></div>
+        <div><span>Nivel de agregación</span><strong id="traceGrain">—</strong></div>
+        <p id="tracePrivacy">Datos agregados. No se muestran datos personales, coordenadas exactas ni información individual de productores.</p>
+      </section>
+      <section id="qualityPanel" class="card panel quality-panel" aria-labelledby="qualityTitle" aria-live="polite">
+        <div class="panel-header"><div><p class="eyebrow">GOBERNANZA Y CONFIABILIDAD</p><h2 id="qualityTitle">Control de calidad de datos</h2></div><div id="qualityStatus" class="quality-status"><span class="quality-light"></span><strong id="qualityStatusText">Verificando…</strong></div></div>
+        <p id="qualitySummary" class="quality-summary">Se están validando carga, metadata, privacidad y consistencia de totales.</p>
+        <ul id="qualityChecks" class="quality-checks"></ul>
+      </section>
       <section class="metric-grid" aria-label="Indicadores principales">
-        <article class="card metric-card"><span>REGISTROS</span><strong id="metricRecords">—</strong><small id="metricMapped">— georreferenciados</small></article>
+        <article class="card metric-card"><span>REGISTROS PRODUCTIVOS</span><strong id="metricRecords">—</strong><small id="metricMapped">— georreferenciados · Según filtros activos</small></article>
         <article class="card metric-card featured"><span id="territorySpeciesLabel">BOVINOS</span><strong id="metricBovinos">—</strong><small id="metricDensity">— cabezas / registro</small></article>
-        <article class="card metric-card"><span>RELEVANCIA TOP 5</span><strong id="metricConcentration">—</strong><small>del stock bovino</small></article>
-        <article class="card metric-card"><span>GRILLAS ACTIVAS</span><strong id="metricGrids">—</strong><small>aprox. 13 km por celda</small></article>
+        <article class="card metric-card"><span>CONCENTRACIÓN TOP 5</span><strong id="metricConcentration">—</strong><small>Datos agregados · del stock seleccionado</small></article>
+        <article class="card metric-card"><span>CELDAS TERRITORIALES ACTIVAS</span><strong id="metricGrids">—</strong><small>aprox. 13 km por celda · Sin identificación</small></article>
       </section>
       <section class="territory-layout">
         <article class="card panel map-panel">
@@ -98,7 +118,8 @@
     </main>
     <footer class="footer senasa-footer"><span>Datos agregados para consulta ejecutiva · SIN datos personales ni ubicaciones exactas.</span><span>Interfaz basada en <a href="https://github.com/colorlibhq/gentelella" target="_blank" rel="noopener">Gentelella v4</a> · MIT</span></footer>
     <dialog id="infoDialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">NOTA METODOLÓGICA</p><h2>Datos territoriales para gestión</h2><p id="sourceInfo">—</p><p>Esta vista no incluye datos personales, contactos, identificadores ni ubicación exacta de predios. Los indicadores económicos se encuentran en la vista de Análisis y requieren supuestos explícitos.</p></dialog>
-    <dialog id="renspaDialog" class="renspa-dialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">CONSULTA OPERATIVA PROTEGIDA</p><h2>RENSPA no disponible en la versión pública</h2><p>Este sitio sólo usa agregados territoriales y no recibe ni guarda RENSPA. La consulta por unidad productiva requiere un servicio operativo autenticado de DEA, con control de acceso y auditoría.</p><p class="dialog-note">Los filtros territoriales sí se aplican a todas las vistas públicas del tablero.</p></dialog>
+    <dialog id="locatorDialog" class="renspa-dialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">LOCALIZADOR PROTEGIDO</p><h2 id="locatorDialogTitle">Consulta protegida</h2><p id="locatorStatus">La búsqueda por identificador requiere un servicio seguro autenticado. Esta versión pública sólo permite análisis agregado.</p><div id="locatorResult" class="locator-result" aria-live="polite"></div><p class="dialog-note">No se muestran ni almacenan identificadores, productores, domicilios, coordenadas exactas o existencias individuales.</p></dialog>
+    <script src="./config.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
