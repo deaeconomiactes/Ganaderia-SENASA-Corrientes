@@ -53,8 +53,21 @@
 
   function init(data) {
     setupCommon(data);
+    setupRenspaSearch();
     if (document.body.dataset.view === "territorio") initTerritory(data);
     if (document.body.dataset.view === "analisis") initAnalysis(data);
+  }
+
+  function setupRenspaSearch() {
+    const form = $("#renspaSearchForm");
+    const input = $("#renspaSearchInput");
+    const dialog = $("#renspaDialog");
+    form?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (input) input.value = "";
+      dialog?.showModal?.();
+    });
+    document.querySelectorAll(".dialog-close").forEach((button) => button.addEventListener("click", () => button.closest("dialog")?.close()));
   }
 
   function setupCommon(data) {
@@ -70,30 +83,28 @@
     const totals = data.totales;
     const speciesSelect = $("#speciesSelect");
     const deptSelect = $("#departmentSelect");
+    const municipalitySelect = $("#municipalitySelect");
+    const officeSelect = $("#officeSelect");
     const map = $("#territoryMap");
-    const state = { species: "bovinos", department: "all", mode: "browse", vertices: [], selected: [], activeGrids: [], projection: null, zoom: false };
-    setText("#metricRecords", formatNumber.format(totals.registros));
-    setText("#metricMapped", `${formatNumber.format(totals.registros_georreferenciados)} georreferenciados`);
-    setText("#metricConcentration", `${totals.concentracion_top5_bovinos.toLocaleString("es-AR", { maximumFractionDigits: 1 })}%`);
-    setText("#metricGrids", formatNumber.format(data.grillas.length));
+    const filters = readGlobalFilters();
+    const state = { filters, species: filters.species, department: filters.department, mode: "browse", vertices: [], selected: [], activeGrids: [], projection: null, zoom: false };
     setText("#sourceInfo", `${data.metadata.alcance} ${data.metadata.privacidad} ${data.metadata.geometria}`);
     const dialog = $("#infoDialog");
     $("#infoButton")?.addEventListener("click", () => dialog.showModal());
-    $(".dialog-close")?.addEventListener("click", () => dialog.close());
-
-    speciesSelect.innerHTML = SPECIES.map(([key, label]) => `<option value="${key}">${label}</option>`).join("");
-    deptSelect.innerHTML = `<option value="all">Toda la provincia</option>${data.departamentos.map((item) => `<option value="${escapeHtml(item.nombre)}">${escapeHtml(titleCase(item.nombre))}</option>`).join("")}`;
-    const redraw = () => {
-      state.species = speciesSelect.value;
-      state.department = deptSelect.value;
+    const redraw = (resetLocation = false) => {
+      if (resetLocation) {
+        state.vertices = [];
+        state.selected = [];
+        state.zoom = false;
+      }
+      syncLocationControls(data, state.filters, { species: speciesSelect, department: deptSelect, municipality: municipalitySelect, office: officeSelect });
+      state.species = state.filters.species;
+      state.department = state.filters.department;
       state.mode = "browse";
-      state.vertices = [];
-      state.selected = [];
-      state.zoom = false;
+      saveGlobalFilters(state.filters);
       renderTerritory(data, state);
     };
-    speciesSelect.addEventListener("change", redraw);
-    deptSelect.addEventListener("change", redraw);
+    bindLocationControls(data, state.filters, { species: speciesSelect, department: deptSelect, municipality: municipalitySelect, office: officeSelect }, () => redraw(true));
 
     $("#drawAreaButton")?.addEventListener("click", () => {
       state.mode = "drawing";
@@ -123,35 +134,38 @@
     map?.addEventListener("keydown", (event) => {
       if (state.mode === "drawing" && event.key === "Enter") finishSelection(data, state);
     });
-    renderTerritory(data, state);
+    redraw(true);
     registerModelTool({
       name: "set_territorial_filter",
       title: "Filtrar mapa territorial",
-      description: "Actualiza el mapa de Corrientes por especie y, opcionalmente, por departamento.",
-      inputSchema: { type: "object", properties: { especie: { type: "string", enum: SPECIES.map(([key]) => key) }, departamento: { type: "string" } }, required: ["especie"], additionalProperties: false },
+      description: "Actualiza el mapa de Corrientes por especie y filtro territorial agregado.",
+      inputSchema: { type: "object", properties: { especie: { type: "string", enum: SPECIES.map(([key]) => key) }, departamento: { type: "string" }, municipio: { type: "string" }, oficina: { type: "string" } }, required: ["especie"], additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute(input) {
         if (!input || !SPECIES.some(([key]) => key === input.especie)) throw new Error("Especie no válida.");
         const requestedDepartment = input.departamento || "all";
         if (![...deptSelect.options].some((option) => option.value === requestedDepartment)) throw new Error("Departamento no válido.");
-        speciesSelect.value = input.especie;
-        deptSelect.value = requestedDepartment;
-        redraw();
-        return { especie: input.especie, departamento: requestedDepartment, grillas_visibles: state.activeGrids.length };
+        state.filters.species = input.especie;
+        state.filters.department = requestedDepartment;
+        state.filters.municipality = input.municipio || "";
+        state.filters.office = input.oficina || "";
+        redraw(true);
+        return { especie: input.especie, departamento: requestedDepartment, municipio: state.filters.municipality || null, oficina: state.filters.office || null, grillas_visibles: state.activeGrids.length };
       },
     });
   }
 
   function renderTerritory(data, state) {
-    const grids = data.grillas.filter((item) => state.department === "all" || item.departamento === state.department);
-    const municipalities = data.municipios.filter((item) => state.department === "all" || item.departamento === state.department);
+    const grids = filterGrids(data.grillas, state.filters);
+    const municipalities = filterRows(data.municipios, state.filters);
     const label = speciesLabel(state.species);
     state.activeGrids = grids;
     renderMap(data, grids, state);
     const selected = state.mode === "selected" ? state.selected : null;
     renderFocus(selected || grids, state.species, label);
     renderMunicipalities(municipalities);
-    const localTotal = sum(grids, state.species);
+    const localTotal = sum(municipalities, state.species);
+    updateTerritoryMetrics(data, state.filters, municipalities, grids);
     setText("#selectedSummary", state.mode === "selected" ? `${formatNumber.format(sum(state.selected, state.species))} ${label.toLowerCase()} en el área` : `${formatNumber.format(localTotal)} ${label.toLowerCase()}`);
     setText("#tableSummary", state.mode === "selected" ? "Detalle municipal según los filtros activos" : `${formatNumber.format(municipalities.length)} unidades territoriales`);
     updateSelectionPresentation(state, label, localTotal);
@@ -304,49 +318,121 @@
   }
 
   function initAnalysis(data) {
-    const totals = data.totales;
-    setText("#metricAnimals", formatNumber.format(totals.animales));
-    setText("#metricBovineShare", `${(totals.bovinos / totals.animales * 100).toLocaleString("es-AR", { maximumFractionDigits: 1 })}% de las existencias`);
-    setText("#metricCoverage", `${(totals.registros_georreferenciados / totals.registros * 100).toLocaleString("es-AR", { maximumFractionDigits: 1 })}%`);
-    renderSpecies(data); renderBars(data.departamentos); renderScatter(data.departamentos); renderSpatialStatistics(data); setupScenario(totals.bovinos); renderInsight(data); renderTraceability(data);
+    const controls = {
+      species: $("#analysisSpeciesSelect"), department: $("#analysisDepartmentSelect"), municipality: $("#analysisMunicipalitySelect"), office: $("#analysisOfficeSelect"),
+      level: $("#analysisLevelSelect"), metric: $("#analysisMetricSelect"), detailSearch: $("#analysisDetailSearch"),
+    };
+    const state = { filters: readGlobalFilters(), level: "department", metric: "stock", detailSearch: "" };
+    const render = () => {
+      syncLocationControls(data, state.filters, controls);
+      const rows = filterRows(data.municipios, state.filters);
+      const species = state.filters.species;
+      const totalSpecies = sum(rows, species);
+      const totalAnimals = sumSpecies(rows);
+      const records = sum(rows, "registros");
+      const units = aggregateUnits(rows, state.level);
+      renderAnalysisCards(totalAnimals, totalSpecies, records, species);
+      renderSpecies(rows, totalAnimals);
+      renderBars(units, species, state.metric, totalSpecies, state.level);
+      renderScatter(units, species, state.level);
+      renderSpatialStatistics(data, state.filters, species);
+      renderAnalysisDetail(units, species, totalSpecies, state.level, state.detailSearch);
+      updateScenario(totalSpecies, species);
+      renderInsight(units, species, totalSpecies, state.level);
+      renderTraceability(data, rows, state.filters);
+      setText("#activeFilterSummary", filterSummary(state.filters, rows.length, records));
+      saveGlobalFilters(state.filters);
+    };
+    bindLocationControls(data, state.filters, controls, render);
+    controls.level.addEventListener("change", () => { state.level = controls.level.value; render(); });
+    controls.metric.addEventListener("change", () => { state.metric = controls.metric.value; render(); });
+    controls.detailSearch.addEventListener("input", () => { state.detailSearch = controls.detailSearch.value; renderAnalysisDetail(aggregateUnits(filterRows(data.municipios, state.filters), state.level), state.filters.species, sum(filterRows(data.municipios, state.filters), state.filters.species), state.level, state.detailSearch); });
+    $("#resetAnalysisFilters")?.addEventListener("click", () => {
+      state.filters = defaultFilters(); state.level = "department"; state.metric = "stock"; state.detailSearch = "";
+      controls.level.value = state.level; controls.metric.value = state.metric; controls.detailSearch.value = ""; render();
+    });
+    setupScenario();
+    render();
+    registerModelTool({
+      name: "set_analysis_filter",
+      title: "Filtrar análisis ganadero",
+      description: "Actualiza el análisis por especie y filtro territorial agregado.",
+      inputSchema: { type: "object", properties: { especie: { type: "string", enum: SPECIES.map(([key]) => key) }, departamento: { type: "string" }, municipio: { type: "string" }, oficina: { type: "string" } }, required: ["especie"], additionalProperties: false },
+      annotations: { readOnlyHint: true, untrustedContentHint: false },
+      execute(input) {
+        if (!input || !SPECIES.some(([key]) => key === input.especie)) throw new Error("Especie no válida.");
+        state.filters.species = input.especie;
+        state.filters.department = input.departamento || "all";
+        state.filters.municipality = input.municipio || "";
+        state.filters.office = input.oficina || "";
+        render();
+        return { especie: state.filters.species, departamento: state.filters.department, municipio: state.filters.municipality || null, oficina: state.filters.office || null };
+      },
+    });
   }
 
-  function renderSpecies(data) {
-    const total = data.totales.animales;
+  function renderAnalysisCards(totalAnimals, totalSpecies, records, species) {
+    const label = speciesLabel(species);
+    setText("#metricAnimals", formatNumber.format(totalAnimals));
+    setText("#metricSpeciesLabel", label.toUpperCase());
+    setText("#metricBovinos", formatNumber.format(totalSpecies));
+    setText("#metricBovineShare", `${formatDecimal.format(totalAnimals ? totalSpecies / totalAnimals * 100 : 0)}% de las existencias`);
+    setText("#metricRecordsAnalysis", formatNumber.format(records));
+    setText("#metricDensity", formatDecimal.format(records ? totalSpecies / records : 0));
+    setText("#metricDensityLabel", `${label.toLowerCase()} por registro`);
+  }
+
+  function renderSpecies(rows, total) {
     let offset = 0;
-    const segments = SPECIES.map(([key, , color]) => { const portion = value(data.totales, key) / total * 100; const result = `${color} ${offset}% ${offset + portion}%`; offset += portion; return result; });
+    const segments = SPECIES.map(([key, , color]) => { const portion = total ? sum(rows, key) / total * 100 : 0; const result = `${color} ${offset}% ${offset + portion}%`; offset += portion; return result; });
     $("#speciesDonut").style.background = `conic-gradient(${segments.join(",")})`;
     setText("#donutTotal", formatNumber.format(total));
-    $("#speciesLegend").innerHTML = SPECIES.map(([key, label, color]) => `<div class="legend-row"><span class="legend-swatch" style="background:${color}"></span><span class="legend-name">${label}</span><span class="legend-value">${formatNumber.format(value(data.totales, key))}</span></div>`).join("");
+    $("#speciesLegend").innerHTML = SPECIES.map(([key, label, color]) => `<div class="legend-row"><span class="legend-swatch" style="background:${color}"></span><span class="legend-name">${label}</span><span class="legend-value">${formatNumber.format(sum(rows, key))}</span></div>`).join("");
   }
 
-  function renderBars(departments) {
-    const top = departments.slice(0, 8); const max = top[0]?.bovinos || 1;
-    $("#departmentBars").innerHTML = top.map((item) => `<div class="bar-row"><span class="bar-label">${escapeHtml(titleCase(item.nombre))}</span><div class="bar-track"><div class="bar-fill" style="width:${item.bovinos / max * 100}%"></div></div><strong class="bar-value">${formatNumber.format(item.bovinos)}</strong></div>`).join("");
+  function renderBars(units, species, metric, totalSpecies, level) {
+    const ordered = [...units].sort((a, b) => metricValue(b, species, metric, totalSpecies) - metricValue(a, species, metric, totalSpecies)).slice(0, 10);
+    const max = Math.max(...ordered.map((item) => metricValue(item, species, metric, totalSpecies)), 1);
+    const metricLabel = { stock: `mayores existencias de ${speciesLabel(species).toLowerCase()}`, records: "más registros", density: `mayor intensidad de ${speciesLabel(species).toLowerCase()}`, share: "mayor participación" }[metric];
+    setText("#rankingTitle", `${levelLabel(level)} con ${metricLabel}`);
+    $("#departmentBars").innerHTML = ordered.map((item) => `<div class="bar-row"><span class="bar-label">${escapeHtml(titleCase(item.nombre))}</span><div class="bar-track"><div class="bar-fill" style="width:${metricValue(item, species, metric, totalSpecies) / max * 100}%"></div></div><strong class="bar-value">${formatMetric(metricValue(item, species, metric, totalSpecies), metric)}</strong></div>`).join("") || '<p class="loading">Sin unidades para el filtro seleccionado.</p>';
   }
 
-  function renderScatter(departments) {
-    const maxRecords = Math.max(...departments.map((item) => item.registros), 1); const maxBovines = Math.max(...departments.map((item) => item.bovinos), 1);
-    $("#scatterPoints").innerHTML = departments.map((item) => { const density = item.bovinos / Math.max(item.registros, 1); const size = 8 + Math.min(18, Math.sqrt(density) / 2); return `<span class="scatter-point" title="${escapeHtml(titleCase(item.nombre))}: ${formatNumber.format(item.registros)} registros · ${formatNumber.format(item.bovinos)} bovinos" style="left:${item.registros / maxRecords * 92 + 3}%;bottom:${item.bovinos / maxBovines * 88 + 3}%;width:${size}px;height:${size}px"></span>`; }).join("");
+  function renderScatter(units, species, level) {
+    const maxRecords = Math.max(...units.map((item) => item.registros), 1); const maxStock = Math.max(...units.map((item) => value(item, species)), 1);
+    setText("#scatterTitle", `Registros vs. ${speciesLabel(species).toLowerCase()}`);
+    setText("#scatterAxisY", speciesLabel(species));
+    setText("#scatterFootnote", `Cada punto representa ${level === "department" ? "un" : "una"} ${levelLabel(level).toLowerCase()}; el tamaño expresa ${speciesLabel(species).toLowerCase()} por registro.`);
+    $("#scatterPoints").innerHTML = units.map((item) => { const density = value(item, species) / Math.max(item.registros, 1); const size = 8 + Math.min(18, Math.sqrt(density) / 2); return `<span class="scatter-point" title="${escapeHtml(titleCase(item.nombre))}: ${formatNumber.format(item.registros)} registros · ${formatNumber.format(value(item, species))} ${speciesLabel(species).toLowerCase()}" style="left:${item.registros / maxRecords * 92 + 3}%;bottom:${value(item, species) / maxStock * 88 + 3}%;width:${size}px;height:${size}px"></span>`; }).join("");
   }
 
-  function renderSpatialStatistics(data) {
-    const stats = calculateSpatialStats(data);
+  function renderSpatialStatistics(data, filters, species) {
+    const grids = filterGrids(data.grillas, filters);
+    const unavailableAtOffice = Boolean(filters.office);
+    const stats = unavailableAtOffice ? null : calculateSpatialStats(grids, species);
+    setText("#spatialStatsTitle", `Dispersión y concentración espacial de ${speciesLabel(species).toLowerCase()}`);
+    setText("#spatialGridContext", unavailableAtOffice ? "No disponible por oficina local" : `${formatNumber.format(grids.length)} grillas agregadas`);
+    if (!stats || !grids.length) {
+      ["#statMedianGrid", "#statP90Grid", "#statSpatialCV", "#statGini", "#statHHI"].forEach((selector) => setText(selector, "—"));
+      setText("#statisticalNarrative", unavailableAtOffice ? "Las grillas territoriales no incluyen oficina local; mantenga el filtro hasta municipio o departamento para consultar estadística espacial." : "No hay grillas agregadas comparables para el filtro seleccionado.");
+      return;
+    }
     setText("#statMedianGrid", formatNumber.format(stats.median));
     setText("#statP90Grid", formatNumber.format(stats.p90));
     setText("#statSpatialCV", `${formatDecimal.format(stats.cv)}%`);
     setText("#statGini", stats.gini.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }));
     setText("#statHHI", formatNumber.format(stats.hhi));
-    setText("#statisticalNarrative", `La mediana es de ${formatNumber.format(stats.median)} bovinos por grilla, mientras que el 10% superior supera ${formatNumber.format(stats.p90)}. La dispersión relativa (CV) es ${formatDecimal.format(stats.cv)}%; los índices de Gini e IHH describen concentración territorial y no productividad ni rentabilidad.`);
+    setText("#statisticalNarrative", `La mediana es de ${formatNumber.format(stats.median)} ${speciesLabel(species).toLowerCase()} por grilla, mientras que el 10% superior supera ${formatNumber.format(stats.p90)}. La dispersión relativa (CV) es ${formatDecimal.format(stats.cv)}%; los índices de Gini e IHH describen concentración territorial y no productividad ni rentabilidad.`);
   }
 
-  function calculateSpatialStats(data) {
-    const values = data.grillas.map((item) => value(item, "bovinos"));
+  function calculateSpatialStats(grids, species) {
+    const values = grids.map((item) => value(item, species));
     const total = sum(values);
     const mean = total / Math.max(values.length, 1);
     const deviation = Math.sqrt(sum(values.map((item) => (item - mean) ** 2)) / Math.max(values.length, 1));
     const ordered = [...values].sort((a, b) => a - b);
-    const hhi = sum(data.departamentos.map((item) => (value(item, "bovinos") / data.totales.bovinos) ** 2)) * 10000;
+    const byDepartment = aggregateUnits(grids.map((item) => ({ ...item, nombre: item.municipio, oficina: "" })), "department");
+    const hhi = sum(byDepartment.map((item) => (value(item, species) / Math.max(total, 1)) ** 2)) * 10000;
     const weightedRank = ordered.reduce((acc, item, index) => acc + (index + 1) * item, 0);
     const gini = total ? (2 * weightedRank) / (ordered.length * total) - (ordered.length + 1) / ordered.length : 0;
     return { median: quantile(ordered, .5), p90: quantile(ordered, .9), cv: mean ? deviation / mean * 100 : 0, hhi, gini };
@@ -358,45 +444,146 @@
     return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
   }
 
-  function setupScenario(bovines) {
+  function setupScenario() {
     const price = $("#priceInput"), cost = $("#costInput"), trace = $("#scenarioTrace");
-    const update = () => {
+    const update = (stock = 0, species = "bovinos") => {
       const p = Number(price.value), c = Number(cost.value);
       const hasPrice = price.value.trim() !== "" && Number.isFinite(p) && p >= 0;
       const hasCost = cost.value.trim() !== "" && Number.isFinite(c) && c >= 0;
-      setText("#grossValue", hasPrice ? formatMoney.format(bovines * p) : "Ingrese un supuesto");
-      setText("#costValue", hasCost ? formatMoney.format(bovines * c) : "Ingrese un supuesto");
-      setText("#netValue", hasPrice && hasCost ? formatMoney.format(bovines * (p - c)) : "—");
-      if (trace) trace.textContent = hasPrice && hasCost ? `Escenario de esta sesión: ${formatMoney.format(p)} de valor y ${formatMoney.format(c)} de costo por bovino × ${formatNumber.format(bovines)} bovinos. Margen unitario supuesto: ${formatMoney.format(p - c)}.` : "Defina ambos supuestos para documentar el escenario de consulta.";
+      setText("#grossValue", hasPrice ? formatMoney.format(stock * p) : "Ingrese un supuesto");
+      setText("#costValue", hasCost ? formatMoney.format(stock * c) : "Ingrese un supuesto");
+      setText("#netValue", hasPrice && hasCost ? formatMoney.format(stock * (p - c)) : "—");
+      if (trace) trace.textContent = hasPrice && hasCost ? `Escenario de esta sesión: ${formatMoney.format(p)} de valor y ${formatMoney.format(c)} de costo por cabeza × ${formatNumber.format(stock)} ${speciesLabel(species).toLowerCase()}. Margen unitario supuesto: ${formatMoney.format(p - c)}.` : "Defina ambos supuestos para documentar el escenario de consulta.";
     };
-    price.addEventListener("input", update); cost.addEventListener("input", update); update();
-    registerModelTool({
-      name: "set_economic_scenario",
-      title: "Definir escenario económico",
-      description: "Actualiza el escenario visible con un valor y costo estimado por bovino en pesos argentinos.",
-      inputSchema: { type: "object", properties: { valor_por_bovino: { type: "number", minimum: 0 }, costo_por_bovino: { type: "number", minimum: 0 } }, required: ["valor_por_bovino", "costo_por_bovino"], additionalProperties: false },
-      annotations: { readOnlyHint: false, untrustedContentHint: false },
-      execute(input) {
-        if (!input || !Number.isFinite(input.valor_por_bovino) || !Number.isFinite(input.costo_por_bovino) || input.valor_por_bovino < 0 || input.costo_por_bovino < 0) throw new Error("Los supuestos deben ser números no negativos.");
-        price.value = String(input.valor_por_bovino);
-        cost.value = String(input.costo_por_bovino);
-        update();
-        return { bovinos: bovines, valor_bruto_estimado: bovines * input.valor_por_bovino, costo_estimado: bovines * input.costo_por_bovino, margen_referencia: bovines * (input.valor_por_bovino - input.costo_por_bovino) };
-      },
-    });
+    price.addEventListener("input", () => update(Number(price.dataset.stock || 0), price.dataset.species || "bovinos"));
+    cost.addEventListener("input", () => update(Number(price.dataset.stock || 0), price.dataset.species || "bovinos"));
+    price._scenarioUpdate = update;
   }
 
-  function renderInsight(data) {
-    const first = data.departamentos[0]; const share = first.bovinos / data.totales.bovinos * 100;
-    setText("#insightTitle", `${titleCase(first.nombre)} concentra el mayor stock bovino`);
-    setText("#insightText", `Con ${formatNumber.format(first.bovinos)} bovinos, representa ${share.toLocaleString("es-AR", { maximumFractionDigits: 1 })}% del stock provincial. La concentración de los cinco departamentos principales alcanza ${data.totales.concentracion_top5_bovinos.toLocaleString("es-AR", { maximumFractionDigits: 1 })}%.`);
+  function updateScenario(stock, species) {
+    const price = $("#priceInput"), cost = $("#costInput");
+    if (!price || !cost) return;
+    price.dataset.stock = String(stock); price.dataset.species = species;
+    cost.dataset.stock = String(stock); cost.dataset.species = species;
+    setText("#scenarioIntro", `Ingrese supuestos en ARS por cabeza de ${speciesLabel(species).toLowerCase()}. Los valores no provienen de una cotización de mercado ni se guardan en la base.`);
+    price._scenarioUpdate?.(stock, species);
   }
 
-  function renderTraceability(data) {
+  function renderAnalysisDetail(units, species, totalSpecies, level, search) {
+    const query = String(search || "").trim().toLocaleLowerCase("es-AR");
+    const shown = [...units].filter((item) => !query || [item.nombre, item.departamento, item.oficina].some((text) => String(text || "").toLocaleLowerCase("es-AR").includes(query))).sort((a, b) => value(b, species) - value(a, species));
+    setText("#detailTitle", `Detalle por ${levelLabel(level).toLowerCase()}`);
+    setText("#detailPrimaryHeader", levelLabel(level));
+    setText("#detailScopeHeader", level === "department" ? "Cobertura filtrada" : "Departamento");
+    $("#analysisDetailRows").innerHTML = shown.map((item) => `<tr><td>${escapeHtml(titleCase(item.nombre))}</td><td>${escapeHtml(titleCase(item.departamento || "—"))}</td><td>${escapeHtml(titleCase(item.oficina || "—"))}</td><td class="numeric">${formatNumber.format(item.registros)}</td><td class="numeric">${formatNumber.format(value(item, species))}</td><td class="numeric">${formatDecimal.format(item.registros ? value(item, species) / item.registros : 0)}</td><td class="numeric">${formatDecimal.format(totalSpecies ? value(item, species) / totalSpecies * 100 : 0)}%</td></tr>`).join("") || '<tr><td colspan="7">Sin unidades para el filtro seleccionado.</td></tr>';
+    setText("#detailFootnote", `${formatNumber.format(shown.length)} unidades agregadas · El detalle no contiene RENSPA, titulares ni ubicaciones exactas.`);
+  }
+
+  function renderInsight(units, species, totalSpecies, level) {
+    const first = [...units].sort((a, b) => value(b, species) - value(a, species))[0];
+    if (!first) { setText("#insightTitle", "No hay unidades para el corte seleccionado"); setText("#insightText", "Restablezca o amplíe los filtros para recuperar la población de análisis."); return; }
+    const share = value(first, species) / Math.max(totalSpecies, 1) * 100;
+    setText("#insightTitle", `${titleCase(first.nombre)} lidera el corte seleccionado`);
+    setText("#insightText", `Con ${formatNumber.format(value(first, species))} ${speciesLabel(species).toLowerCase()}, representa ${formatDecimal.format(share)}% del stock de la especie en el nivel ${levelLabel(level).toLowerCase()}.`);
+  }
+
+  function renderTraceability(data, rows, filters) {
     const target = $("#sourceTraceability");
     if (!target) return;
     const date = new Date(data.metadata.actualizado).toLocaleDateString("es-AR");
-    target.innerHTML = `<ul class="trace-list"><li><span>Fuente</span><strong>${escapeHtml(data.metadata.fuente)}</strong></li><li><span>Actualización</span><strong>${date}</strong></li><li><span>Unidad</span><strong>Registro, municipio, departamento y grilla territorial agregada.</strong></li><li><span>Privacidad</span><strong>No contiene titulares, identificadores, contactos ni coordenadas exactas.</strong></li><li><span>Límite</span><strong>${escapeHtml(data.metadata.alcance)}</strong></li></ul>`;
+    target.innerHTML = `<ul class="trace-list"><li><span>Fuente</span><strong>${escapeHtml(data.metadata.fuente)}</strong></li><li><span>Actualización</span><strong>${date}</strong></li><li><span>Corte activo</span><strong>${escapeHtml(filterSummary(filters, rows.length, sum(rows, "registros")))}</strong></li><li><span>Unidad</span><strong>Registro, municipio, departamento, oficina local y grilla territorial agregada.</strong></li><li><span>Privacidad</span><strong>No contiene RENSPA, titulares, contactos ni coordenadas exactas.</strong></li><li><span>Límite</span><strong>${escapeHtml(data.metadata.alcance)}</strong></li></ul>`;
+  }
+
+  function defaultFilters() { return { species: "bovinos", department: "all", municipality: "", office: "" }; }
+
+  function readGlobalFilters() {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem("senasa-corrientes-filters-v1") || "{}");
+      return { ...defaultFilters(), ...stored, species: SPECIES.some(([key]) => key === stored.species) ? stored.species : "bovinos" };
+    } catch { return defaultFilters(); }
+  }
+
+  function saveGlobalFilters(filters) {
+    try { sessionStorage.setItem("senasa-corrientes-filters-v1", JSON.stringify({ species: filters.species, department: filters.department, municipality: filters.municipality, office: filters.office })); } catch { /* La consulta sigue funcionando sin persistencia local. */ }
+  }
+
+  function syncLocationControls(data, filters, controls) {
+    const departments = data.departamentos.map((item) => item.nombre);
+    if (!departments.includes(filters.department)) { filters.department = "all"; filters.municipality = ""; filters.office = ""; }
+    const departmentRows = data.municipios.filter((item) => filters.department === "all" || item.departamento === filters.department);
+    if (filters.municipality && !departmentRows.some((item) => item.nombre === filters.municipality)) { filters.municipality = ""; filters.office = ""; }
+    const municipalityRows = departmentRows.filter((item) => !filters.municipality || item.nombre === filters.municipality);
+    if (filters.office && !municipalityRows.some((item) => item.oficina === filters.office)) filters.office = "";
+    if (controls.species) controls.species.innerHTML = SPECIES.map(([key, label]) => `<option value="${key}">${label}</option>`).join("");
+    if (controls.department) controls.department.innerHTML = `<option value="all">Toda la provincia</option>${departments.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(titleCase(name))}</option>`).join("")}`;
+    if (controls.municipality) {
+      const locations = uniqueBy(departmentRows, (item) => `${item.departamento}|${item.nombre}`);
+      controls.municipality.innerHTML = `<option value="">Todos los municipios</option>${locations.map((item) => `<option value="${locationValue([item.departamento, item.nombre])}">${escapeHtml(titleCase(item.nombre))}${filters.department === "all" ? ` · ${escapeHtml(titleCase(item.departamento))}` : ""}</option>`).join("")}`;
+    }
+    if (controls.office) {
+      const locations = uniqueBy(municipalityRows, (item) => `${item.departamento}|${item.nombre}|${item.oficina}`);
+      controls.office.innerHTML = `<option value="">Todas las oficinas</option>${locations.map((item) => `<option value="${locationValue([item.departamento, item.nombre, item.oficina])}">${escapeHtml(titleCase(item.oficina))} · ${escapeHtml(titleCase(item.nombre))}</option>`).join("")}`;
+    }
+    if (controls.species) controls.species.value = filters.species;
+    if (controls.department) controls.department.value = filters.department;
+    if (controls.municipality) controls.municipality.value = filters.municipality ? locationValue([filters.department, filters.municipality]) : "";
+    if (controls.office) controls.office.value = filters.office ? locationValue([filters.department, filters.municipality, filters.office]) : "";
+  }
+
+  function bindLocationControls(data, filters, controls, onChange) {
+    const update = () => { syncLocationControls(data, filters, controls); onChange(); };
+    controls.species?.addEventListener("change", () => { filters.species = controls.species.value; update(); });
+    controls.department?.addEventListener("change", () => { filters.department = controls.department.value; filters.municipality = ""; filters.office = ""; update(); });
+    controls.municipality?.addEventListener("change", () => {
+      if (!controls.municipality.value) { filters.municipality = ""; filters.office = ""; update(); return; }
+      const [department, municipality] = parseLocationValue(controls.municipality.value);
+      filters.department = department; filters.municipality = municipality; filters.office = ""; update();
+    });
+    controls.office?.addEventListener("change", () => {
+      if (!controls.office.value) { filters.office = ""; update(); return; }
+      const [department, municipality, office] = parseLocationValue(controls.office.value);
+      filters.department = department; filters.municipality = municipality; filters.office = office; update();
+    });
+  }
+
+  function locationValue(parts) { return parts.map((part) => encodeURIComponent(part || "")).join("::"); }
+  function parseLocationValue(value) { return String(value).split("::").map((part) => decodeURIComponent(part)); }
+  function uniqueBy(items, key) { const seen = new Set(); return items.filter((item) => { const current = key(item); if (seen.has(current)) return false; seen.add(current); return true; }); }
+  function filterRows(rows, filters) { return rows.filter((item) => (filters.department === "all" || item.departamento === filters.department) && (!filters.municipality || item.nombre === filters.municipality) && (!filters.office || item.oficina === filters.office)); }
+  function filterGrids(grids, filters) { return grids.filter((item) => (filters.department === "all" || item.departamento === filters.department) && (!filters.municipality || item.municipio === filters.municipality)); }
+  function sumSpecies(rows) { return SPECIES.reduce((total, [key]) => total + sum(rows, key), 0); }
+
+  function aggregateUnits(rows, level) {
+    const groups = new Map();
+    rows.forEach((row) => {
+      const municipality = row.municipio || row.nombre || "Sin municipio";
+      const office = row.oficina || "Sin oficina";
+      const key = level === "department" ? row.departamento : level === "municipality" ? `${row.departamento}|${municipality}` : `${row.departamento}|${municipality}|${office}`;
+      if (!groups.has(key)) groups.set(key, { nombre: level === "department" ? row.departamento : level === "municipality" ? municipality : office, departamento: row.departamento || "", municipio: municipality, oficina: level === "office" ? office : "", registros: 0, bovinos: 0, bubalinos: 0, equinos: 0, porcinos: 0, caprinos: 0, ovinos: 0 });
+      const target = groups.get(key); target.registros += value(row, "registros"); SPECIES.forEach(([species]) => { target[species] += value(row, species); });
+    });
+    return [...groups.values()];
+  }
+
+  function metricValue(item, species, metric, totalSpecies) {
+    if (metric === "records") return value(item, "registros");
+    if (metric === "density") return value(item, species) / Math.max(value(item, "registros"), 1);
+    if (metric === "share") return value(item, species) / Math.max(totalSpecies, 1) * 100;
+    return value(item, species);
+  }
+  function formatMetric(metric, kind) { return kind === "share" ? `${formatDecimal.format(metric)}%` : kind === "density" ? formatDecimal.format(metric) : formatNumber.format(metric); }
+  function levelLabel(level) { return ({ department: "Departamento", municipality: "Municipio", office: "Oficina local" })[level] || "Unidad"; }
+  function filterSummary(filters, rows, records) { const parts = [speciesLabel(filters.species), filters.department === "all" ? "Toda la provincia" : titleCase(filters.department), filters.municipality ? titleCase(filters.municipality) : "", filters.office ? titleCase(filters.office) : ""].filter(Boolean); return `${parts.join(" · ")} · ${formatNumber.format(rows)} agregados municipio–oficina · ${formatNumber.format(records)} registros`; }
+
+  function updateTerritoryMetrics(data, filters, rows, grids) {
+    const species = filters.species; const records = sum(rows, "registros"); const stock = sum(rows, species); const sorted = [...grids].sort((a, b) => value(b, species) - value(a, species)); const topFive = sum(sorted.slice(0, 5), species);
+    setText("#territorySpeciesLabel", speciesLabel(species).toUpperCase());
+    setText("#metricRecords", formatNumber.format(records));
+    setText("#metricMapped", `${formatNumber.format(grids.length)} grillas agregadas`);
+    setText("#metricBovinos", formatNumber.format(stock));
+    setText("#metricDensity", `${formatDecimal.format(records ? stock / records : 0)} cabezas / registro`);
+    setText("#metricConcentration", `${formatDecimal.format(stock ? topFive / stock * 100 : 0)}%`);
+    setText("#metricGrids", formatNumber.format(grids.length));
   }
 
   function registerModelTool(tool) {
@@ -407,6 +594,6 @@
 
   function flattenCoords(geometry) { const collect = (entry) => Array.isArray(entry?.[0]) ? entry.flatMap(collect) : [entry]; return geometry?.coordinates ? collect(geometry.coordinates).filter((point) => Array.isArray(point) && Number.isFinite(point[0])) : []; }
   function geometryPath(geometry, project) { const rings = []; const draw = (coords) => { if (Array.isArray(coords?.[0]?.[0])) coords.forEach(draw); else if (Array.isArray(coords?.[0])) rings.push(`M${coords.map((point) => project(point).map((v) => v.toFixed(1)).join(",")).join("L")}Z`); }; draw(geometry.coordinates); return rings.join(" "); }
-  function titleCase(text) { return String(text || "").toLowerCase().replace(/\b\p{L}/gu, (char) => char.toUpperCase()); }
+  function titleCase(text) { return String(text || "").toLocaleLowerCase("es-AR").replace(/(^|[\s\-.(])(\p{L})/gu, (_match, prefix, char) => `${prefix}${char.toLocaleUpperCase("es-AR")}`); }
   function escapeHtml(text) { return String(text ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]); }
 })();

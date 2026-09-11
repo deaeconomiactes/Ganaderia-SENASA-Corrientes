@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./layout-fixes.css" />
     <link rel="stylesheet" href="./executive-upgrade.css" />
+    <link rel="stylesheet" href="./filter-upgrade.css" />
   </head>
   <body data-shell="admin" data-page="dashboard" data-view="territorio">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -59,6 +60,11 @@
         <nav class="breadcrumb" aria-label="Miga de pan"><span>SENASA</span><span class="sep" aria-hidden="true">›</span><span>Ganadería</span><span class="sep" aria-hidden="true">›</span><span class="current" aria-current="page">Territorio</span></nav>
       </div>
       <div class="topbar-right">
+        <form id="renspaSearchForm" class="renspa-search" role="search">
+          <label class="sr-only" for="renspaSearchInput">Consultar RENSPA</label>
+          <input id="renspaSearchInput" name="renspa" inputmode="numeric" autocomplete="off" placeholder="Consultar RENSPA" />
+          <button type="submit">Consultar</button>
+        </form>
         <span class="senasa-public-badge"><span class="status-dot"></span>Solo lectura</span>
         <button class="tb-btn senasa-info-button" id="infoButton" aria-label="Ver información de la fuente">i</button>
       </div>
@@ -74,13 +80,13 @@
       </section>
       <section class="metric-grid" aria-label="Indicadores principales">
         <article class="card metric-card"><span>REGISTROS</span><strong id="metricRecords">—</strong><small id="metricMapped">— georreferenciados</small></article>
-        <article class="card metric-card featured"><span>BOVINOS</span><strong id="metricBovinos">—</strong><small id="metricDensity">— cabezas / registro</small></article>
+        <article class="card metric-card featured"><span id="territorySpeciesLabel">BOVINOS</span><strong id="metricBovinos">—</strong><small id="metricDensity">— cabezas / registro</small></article>
         <article class="card metric-card"><span>RELEVANCIA TOP 5</span><strong id="metricConcentration">—</strong><small>del stock bovino</small></article>
         <article class="card metric-card"><span>GRILLAS ACTIVAS</span><strong id="metricGrids">—</strong><small>aprox. 13 km por celda</small></article>
       </section>
       <section class="territory-layout">
         <article class="card panel map-panel">
-          <div class="panel-header"><div><p class="eyebrow">DISTRIBUCIÓN TERRITORIAL</p><h2>Concentración por zona</h2></div><div class="map-controls"><label>Especie<select id="speciesSelect" aria-label="Seleccionar especie"></select></label><label>Departamento<select id="departmentSelect" aria-label="Filtrar por departamento"></select></label></div></div>
+          <div class="panel-header"><div><p class="eyebrow">DISTRIBUCIÓN TERRITORIAL</p><h2>Concentración por zona</h2></div><div class="map-controls map-controls-extended"><label>Especie<select id="speciesSelect" aria-label="Seleccionar especie"></select></label><label>Departamento<select id="departmentSelect" aria-label="Filtrar por departamento"></select></label><label>Municipio<select id="municipalitySelect" aria-label="Filtrar por municipio"></select></label><label>Oficina local<select id="officeSelect" aria-label="Filtrar por oficina local"></select></label></div></div>
           <div class="map-action-bar" aria-label="Herramientas del mapa"><p id="selectionStatus" class="selection-status">Modo consulta · active la selección para delimitar un área.</p><div class="map-action-buttons"><button id="drawAreaButton" class="map-tool-button primary" type="button">Dibujar área</button><button id="finishAreaButton" class="map-tool-button" type="button" hidden>Finalizar área</button><button id="clearAreaButton" class="map-tool-button" type="button" hidden>Limpiar</button><button id="resetMapViewButton" class="map-tool-button" type="button">Restablecer vista</button></div></div>
           <div class="map-canvas-wrap"><svg id="territoryMap" viewBox="0 0 800 620" role="img" aria-label="Mapa de Corrientes con concentración territorial"><g id="mapGrid"></g><path id="provinceShape"></path><g id="selectionLayer"></g><g id="mapPoints"></g></svg><div id="mapTooltip" class="map-tooltip" hidden></div><div class="map-legend"><span class="legend-dot small"></span>Menor concentración <span class="legend-dot large"></span>Mayor concentración</div></div>
           <section id="selectionInsight" class="selection-insight" aria-live="polite"><div><p class="eyebrow">ÁREA DE CONSULTA</p><h3>Delimite un polígono sobre el mapa</h3><p>Los resultados se calculan sobre grillas territoriales agregadas, no sobre ubicaciones exactas de establecimientos.</p></div></section>
@@ -92,6 +98,7 @@
     </main>
     <footer class="footer senasa-footer"><span>Datos agregados para consulta ejecutiva · SIN datos personales ni ubicaciones exactas.</span><span>Interfaz basada en <a href="https://github.com/colorlibhq/gentelella" target="_blank" rel="noopener">Gentelella v4</a> · MIT</span></footer>
     <dialog id="infoDialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">NOTA METODOLÓGICA</p><h2>Datos territoriales para gestión</h2><p id="sourceInfo">—</p><p>Esta vista no incluye datos personales, contactos, identificadores ni ubicación exacta de predios. Los indicadores económicos se encuentran en la vista de Análisis y requieren supuestos explícitos.</p></dialog>
+    <dialog id="renspaDialog" class="renspa-dialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">CONSULTA OPERATIVA PROTEGIDA</p><h2>RENSPA no disponible en la versión pública</h2><p>Este sitio sólo usa agregados territoriales y no recibe ni guarda RENSPA. La consulta por unidad productiva requiere un servicio operativo autenticado de DEA, con control de acceso y auditoría.</p><p class="dialog-note">Los filtros territoriales sí se aplican a todas las vistas públicas del tablero.</p></dialog>
     <script src="./app.js"></script>
   </body>
 </html>
