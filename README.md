@@ -12,6 +12,15 @@ Dashboard web institucional para explorar existencias ganaderas de Corrientes co
 - La fuente no informa fecha de corte; el tablero lo muestra como advertencia y no infiere evolución temporal.
 - La fecha de actualización del dashboard se mantiene explícita en `dist/config.js`, separada de la fecha de actualización de la fuente.
 
+## Capas cartográficas y lectura del mapa
+
+- La vista pública inicia en `Grilla · celda 0,12°`, el nivel territorial más desagregado disponible en la base agregada.
+- El selector `Nivel visual` permite cambiar a `Municipio` o `Departamento`. Esas vistas agrupan los valores sobre las mismas celdas visibles para conservar trazabilidad y evitar duplicar geometrías.
+- La base disponible contiene centros de grilla, no polígonos administrativos oficiales. Por eso no se inventan límites: el mapa usa celdas agregadas con intensidad de color, escala y tooltips accesibles.
+- Para habilitar coropletas con límites reales, incorporar GeoJSON oficial (departamentos/municipios) en `dist/data/geo/` y conectar la ruta relativa en `dist/config.js`. La capa debe conservar el umbral de publicación y no incluir coordenadas exactas de establecimientos.
+
+El panel **Control de calidad de datos** y sus validaciones siguen implementados para revisión interna, pero la publicación está configurada con `SHOW_INTERNAL_QUALITY_PANEL: false`. Para una revisión operativa temporal puede cambiarse a `true` en `dist/config.js`; debe volver a `false` antes de publicar.
+
 ## Privacidad y seguridad
 
 Este dashboard está diseñado para publicar únicamente información agregada. La búsqueda por RENSPA, DNI, CUIT o CUIL no debe resolverse desde archivos públicos del frontend. Para habilitar esa función se requiere un servicio seguro, autenticado y auditado, que devuelva únicamente zonas agregadas y nunca datos personales ni productivos individuales.
@@ -52,5 +61,6 @@ Conservador, Base y Alto son simulaciones con supuestos ingresados por el usuari
 `dist/app.js` · lógica interactiva y controles de calidad<br>
 `dist/config.js` · rutas, provincia, umbral y endpoint seguro<br>
 `dist/data/` · metadata y base agregada pública<br>
+`dist/data/geo/` · lugar reservado para GeoJSON oficial opcional<br>
 `dist/assets/`, `dist/css/`, `dist/js/` · reservados para extensiones del artefacto estático<br>
 `CONTROL_DE_CALIDAD.md` · checklist de publicación

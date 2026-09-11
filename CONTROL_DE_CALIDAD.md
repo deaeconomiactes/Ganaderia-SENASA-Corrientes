@@ -15,3 +15,7 @@
 - [ ] README completo
 - [ ] Publicación lista para GitHub Pages
 - [ ] Revisar artefacto final de Actions y archivos inesperados antes de anunciarlo
+- [ ] Panel interno de calidad oculto en publicación (`SHOW_INTERNAL_QUALITY_PANEL: false`)
+- [ ] Mapa público usa celdas agregadas y no puntos con coordenadas de establecimientos
+- [ ] El nivel seleccionado del mapa (grilla/municipio/departamento) mantiene trazabilidad de la agregación
+- [ ] No se inventaron polígonos administrativos; GeoJSON oficial pendiente documentado si se requiere coropleta real

@@ -137,6 +137,8 @@
 
   function setupCommon(data) {
     const totals = data.totales;
+    const qualityPanel = $("#qualityPanel");
+    if (qualityPanel) qualityPanel.hidden = APP_CONFIG.SHOW_INTERNAL_QUALITY_PANEL !== true;
     setText("#sidebarRecords", formatNumber.format(totals.registros));
     const now = new Date(data.metadata.actualizado);
     setText("#updateText", Number.isNaN(now.valueOf()) ? "Base cargada correctamente" : `Base cargada correctamente · actualizada ${now.toLocaleDateString("es-AR")}`);
@@ -248,9 +250,11 @@
     const deptSelect = $("#departmentSelect");
     const municipalitySelect = $("#municipalitySelect");
     const officeSelect = $("#officeSelect");
+    const mapLevelSelect = $("#mapLevelSelect");
     const map = $("#territoryMap");
     const filters = readGlobalFilters();
-    const state = { filters, species: filters.species, department: filters.department, mode: "browse", vertices: [], selected: [], activeGrids: [], projection: null, zoom: false };
+    const preferredLayer = APP_CONFIG.MAP_PREFERRED_LAYER === "highest_available_aggregation" ? "grid" : (APP_CONFIG.MAP_PREFERRED_LAYER || "grid");
+    const state = { filters, species: filters.species, department: filters.department, mapLevel: preferredLayer, mode: "browse", vertices: [], selected: [], activeGrids: [], projection: null, zoom: false };
     setText("#sourceInfo", `${data.metadata.alcance} ${data.metadata.privacidad} ${data.metadata.geometria}`);
     const dialog = $("#infoDialog");
     $("#infoButton")?.addEventListener("click", () => dialog.showModal());
@@ -261,6 +265,7 @@
         state.zoom = false;
       }
       syncLocationControls(data, state.filters, { species: speciesSelect, department: deptSelect, municipality: municipalitySelect, office: officeSelect });
+      if (mapLevelSelect) mapLevelSelect.value = state.mapLevel;
       state.species = state.filters.species;
       state.department = state.filters.department;
       state.mode = "browse";
@@ -268,6 +273,7 @@
       renderTerritory(data, state);
     };
     bindLocationControls(data, state.filters, { species: speciesSelect, department: deptSelect, municipality: municipalitySelect, office: officeSelect }, () => redraw(true));
+    mapLevelSelect?.addEventListener("change", () => { state.mapLevel = mapLevelSelect.value; state.vertices = []; state.selected = []; state.zoom = false; renderTerritory(data, state); });
 
     $("#drawAreaButton")?.addEventListener("click", () => {
       state.mode = "drawing";
@@ -385,7 +391,8 @@
     const tooltip = $("#mapTooltip");
     const projection = createMapProjection(data, grids);
     state.projection = projection;
-    svg.setAttribute("viewBox", state.zoom && state.vertices.length > 2 ? selectionViewBox(state.vertices) : MAP_VIEW);
+    const defaultView = APP_CONFIG.MAP_DEFAULT_VIEW && APP_CONFIG.MAP_DEFAULT_VIEW !== "auto" ? APP_CONFIG.MAP_DEFAULT_VIEW : MAP_VIEW;
+    svg.setAttribute("viewBox", state.zoom && state.vertices.length > 2 ? selectionViewBox(state.vertices) : defaultView);
     gridGroup.innerHTML = Array.from({ length: 8 }, (_, index) => {
       const x = projection.padding + index * ((projection.width - projection.padding * 2) / 7);
       const y = projection.padding + index * ((projection.height - projection.padding * 2) / 7);
@@ -398,28 +405,51 @@
     selectionLayer.innerHTML = drawSelection(state.vertices, state.mode === "selected");
     const selectedKeys = new Set(state.selected.map(gridKey));
     const hasSelection = state.mode === "selected";
-    const maxValue = Math.max(...grids.map((item) => value(item, state.species)), 1);
-    pointsGroup.innerHTML = grids.map((item, index) => {
+    const cells = mapDisplayItems(grids, state);
+    const maxValue = Math.max(...cells.map((item) => item.mapValue), 1);
+    pointsGroup.innerHTML = cells.map((item, index) => {
       const [x, y] = projection.project([item.lon, item.lat]);
-      const radius = 3 + Math.sqrt(value(item, state.species) / maxValue) * 18;
-      const classes = ["map-point", hasSelection && selectedKeys.has(gridKey(item)) ? "is-selected" : "", hasSelection && !selectedKeys.has(gridKey(item)) ? "is-dimmed" : ""].filter(Boolean).join(" ");
-      return `<circle class="${classes}" data-index="${index}" tabindex="0" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(titleCase(item.municipio))}: ${formatNumber.format(value(item, state.species))} ${state.species}</title></circle>`;
+      const [xLeft] = projection.project([item.lon - Number(APP_CONFIG.GRID_SIZE || 0.12) / 2, item.lat]);
+      const [xRight] = projection.project([item.lon + Number(APP_CONFIG.GRID_SIZE || 0.12) / 2, item.lat]);
+      const [, yTop] = projection.project([item.lon, item.lat + Number(APP_CONFIG.GRID_SIZE || 0.12) / 2]);
+      const [, yBottom] = projection.project([item.lon, item.lat - Number(APP_CONFIG.GRID_SIZE || 0.12) / 2]);
+      const width = Math.max(3, Math.abs(xRight - xLeft) - 1);
+      const height = Math.max(3, Math.abs(yBottom - yTop) - 1);
+      const classes = ["map-cell", hasSelection && selectedKeys.has(gridKey(item)) ? "is-selected" : "", hasSelection && !selectedKeys.has(gridKey(item)) ? "is-dimmed" : ""].filter(Boolean).join(" ");
+      const intensity = Math.max(.12, Math.sqrt(item.mapValue / maxValue));
+      return `<rect class="${classes}" data-index="${index}" tabindex="0" x="${(x - width / 2).toFixed(1)}" y="${(y - height / 2).toFixed(1)}" width="${width.toFixed(1)}" height="${height.toFixed(1)}" rx="1.5" style="--cell-intensity:${intensity.toFixed(3)}"><title>${escapeHtml(item.mapLabel)}: ${formatNumber.format(item.mapValue)} ${escapeHtml(speciesLabel(state.species).toLowerCase())} · ${formatNumber.format(item.mapRecords)} registros</title></rect>`;
     }).join("");
-    pointsGroup.querySelectorAll(".map-point").forEach((circle) => {
-      const item = grids[Number(circle.dataset.index)];
+    pointsGroup.querySelectorAll(".map-cell").forEach((cell) => {
+      const item = cells[Number(cell.dataset.index)];
       const show = (event) => {
         tooltip.hidden = false;
-        tooltip.innerHTML = `<strong>${escapeHtml(titleCase(item.municipio))}</strong><span>${escapeHtml(titleCase(item.departamento))} · ${formatNumber.format(item.registros)} registros</span><br><b>${formatNumber.format(value(item, state.species))}</b> ${state.species.toLowerCase()}`;
+        tooltip.innerHTML = `<strong>${escapeHtml(item.mapLabel)}</strong><span>${escapeHtml(item.mapUnit)} · ${formatNumber.format(item.mapRecords)} registros</span><br><b>${formatNumber.format(item.mapValue)}</b> ${escapeHtml(speciesLabel(state.species).toLowerCase())}`;
         const box = svg.getBoundingClientRect();
-        const x = event.clientX ? event.clientX - box.left + 14 : Number(circle.getAttribute("cx")) / 800 * box.width + 15;
-        const y = event.clientY ? event.clientY - box.top - 10 : Number(circle.getAttribute("cy")) / 620 * box.height;
+        const x = event.clientX ? event.clientX - box.left + 14 : Number(cell.getAttribute("x")) / 800 * box.width + 15;
+        const y = event.clientY ? event.clientY - box.top - 10 : Number(cell.getAttribute("y")) / 620 * box.height;
         tooltip.style.left = `${Math.min(Math.max(10, x), box.width - 220)}px`;
         tooltip.style.top = `${Math.min(Math.max(10, y), box.height - 95)}px`;
       };
-      circle.addEventListener("pointerenter", show); circle.addEventListener("pointermove", show); circle.addEventListener("focus", show);
-      circle.addEventListener("pointerleave", () => tooltip.hidden = true); circle.addEventListener("blur", () => tooltip.hidden = true);
+      cell.addEventListener("pointerenter", show); cell.addEventListener("pointermove", show); cell.addEventListener("focus", show);
+      cell.addEventListener("pointerleave", () => tooltip.hidden = true); cell.addEventListener("blur", () => tooltip.hidden = true);
     });
+    setText("#mapLayerContext", `Capa: ${mapLevelLabel(state.mapLevel)} · ${formatNumber.format(cells.length)} celdas visibles`);
   }
+
+  function mapDisplayItems(grids, state) {
+    const level = state.mapLevel || "grid";
+    if (level === "grid") return grids.map((item) => ({ ...item, mapValue: value(item, state.species), mapRecords: value(item, "registros"), mapLabel: titleCase(item.municipio || "Zona agregada"), mapUnit: "Grilla agregada" }));
+    const key = level === "department" ? "departamento" : "municipio";
+    const groups = new Map();
+    grids.forEach((item) => {
+      const groupName = item[key] || "Zona agregada";
+      const current = groups.get(groupName) || { stock: 0, records: 0 };
+      current.stock += value(item, state.species); current.records += value(item, "registros"); groups.set(groupName, current);
+    });
+    return grids.map((item) => { const group = groups.get(item[key] || "Zona agregada") || { stock: 0, records: 0 }; return { ...item, mapValue: group.stock, mapRecords: group.records, mapLabel: titleCase(item[key] || "Zona agregada"), mapUnit: `${mapLevelLabel(level)} · celdas agrupadas` }; });
+  }
+
+  function mapLevelLabel(level) { return ({ grid: "Grilla", municipality: "Municipio", department: "Departamento" })[level] || "Grilla"; }
 
   function createMapProjection(data, grids) {
     const allCoords = flattenCoords(data.limite_corrientes || { type: "", coordinates: [] });
