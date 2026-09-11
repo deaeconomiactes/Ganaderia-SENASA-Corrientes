@@ -7,6 +7,6 @@ window.APP_CONFIG = {
   DASHBOARD_UPDATED: "2026-09-11T00:00:00-03:00",
   SHOW_INTERNAL_QUALITY_PANEL: false,
   MAP_DEFAULT_VIEW: "auto",
-  MAP_PREFERRED_LAYER: "highest_available_aggregation",
+  MAP_PREFERRED_LAYER: "municipality",
   GRID_SIZE: 0.12,
 };

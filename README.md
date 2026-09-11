@@ -14,7 +14,7 @@ Dashboard web institucional para explorar existencias ganaderas de Corrientes co
 
 ## Capas cartográficas y lectura del mapa
 
-- La vista pública inicia en `Grilla · celda 0,12°`, el nivel territorial más desagregado disponible en la base agregada.
+- La vista pública inicia en `Municipio · celdas agrupadas`, el nivel más ejecutivo disponible con los datos actuales. La grilla de 0,12° queda como capa secundaria para exploración detallada.
 - El selector `Nivel visual` permite cambiar a `Municipio` o `Departamento`. Esas vistas agrupan los valores sobre las mismas celdas visibles para conservar trazabilidad y evitar duplicar geometrías.
 - La base disponible contiene centros de grilla, no polígonos administrativos oficiales. Por eso no se inventan límites: el mapa usa celdas agregadas con intensidad de color, escala y tooltips accesibles.
 - Para habilitar coropletas con límites reales, incorporar GeoJSON oficial (departamentos/municipios) en `dist/data/geo/` y conectar la ruta relativa en `dist/config.js`. La capa debe conservar el umbral de publicación y no incluir coordenadas exactas de establecimientos.
