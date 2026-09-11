@@ -139,7 +139,7 @@
     const totals = data.totales;
     setText("#sidebarRecords", formatNumber.format(totals.registros));
     const now = new Date(data.metadata.actualizado);
-    setText("#updateText", Number.isNaN(now.valueOf()) ? "Base cargada correctamente" : `Base actualizada ${now.toLocaleDateString("es-AR")}`);
+    setText("#updateText", Number.isNaN(now.valueOf()) ? "Base cargada correctamente" : `Base cargada correctamente · actualizada ${now.toLocaleDateString("es-AR")}`);
     setText("#metricBovinos", formatNumber.format(totals.bovinos));
     setText("#metricDensity", `${Number(totals.bovinos_por_registro || 0).toLocaleString("es-AR", { maximumFractionDigits: 1 })}`);
     renderTraceabilityBand(data);
