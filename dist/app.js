@@ -502,7 +502,8 @@
         return;
       }
       const item = group.items[0]; const selected = state.selected?.id === item.id; const radius = markerRadius(item.totalExistencias, rows);
-      const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "", html: `<span class="producer-marker${selected ? " is-selected" : ""}" style="width:${radius}px;height:${radius}px"></span>`, iconSize: [radius, radius], iconAnchor: [radius / 2, radius / 2] }) });
+      const markerColor = selected ? "#c98336" : speciesColor(dominantProducerSpecies(item));
+      const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "", html: `<span class="producer-marker${selected ? " is-selected" : ""}" style="width:${radius}px;height:${radius}px;background:${markerColor}"></span>`, iconSize: [radius, radius], iconAnchor: [radius / 2, radius / 2] }) });
       marker.bindTooltip(producerTooltip(item), { direction: "top", opacity: .96 });
       marker.on("click", () => selectOperationalProducer(item, state));
       state.markerLayer.addLayer(marker);
@@ -517,6 +518,7 @@
   }
 
   function markerRadius(value, rows) { const max = Math.max(...rows.map((item) => item.totalExistencias), 1); return Math.round(10 + Math.min(12, Math.sqrt(Math.max(0, value) / max) * 12)); }
+  function speciesColor(species) { return ({ bovinos: "#2e8d89", bubalinos: "#b17841", ovinos: "#6d91ad", caprinos: "#8b72a5", porcinos: "#9c6472", equinos: "#597d92" })[species] || "#2e8d89"; }
   function producerTooltip(item) { return `<div class="producer-popup"><strong>${escapeHtml(item.displayId)}</strong><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(item.totalExistencias)}</b> existencias · ${escapeHtml(titleCase(dominantProducerSpecies(item)))}</span></div>`; }
   function dominantProducerSpecies(item) { return Object.entries(item.especies || {}).sort((a, b) => b[1] - a[1])[0]?.[0] || "sin especie informada"; }
 
