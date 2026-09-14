@@ -285,8 +285,17 @@
     try {
       const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const normalized = normalizeProducerData(await response.json());
+      const payload = await response.json();
+      const normalized = normalizeProducerData(payload);
       internalProducerLookup = normalized;
+      let sourceReport = payload?.report || payload?._report || {};
+      const reportUrl = APP_CONFIG.INTERNAL_PRODUCER_REPORT_URL;
+      if (reportUrl) {
+        try {
+          const reportResponse = await fetch(reportUrl, { cache: "no-store" });
+          if (reportResponse.ok) sourceReport = { ...sourceReport, ...(await reportResponse.json()) };
+        } catch (_reportError) { /* El reporte es opcional; la fuente sigue siendo utilizable. */ }
+      }
       const withCoordinates = normalized.filter((item) => validCoordinatePair(item.lat, item.lon));
       const outsideCorrientes = withCoordinates.filter((item) => !isCorrientesCoordinate(item.lat, item.lon)).length;
       // A coordinate can be valid even when it falls outside the provincial
@@ -297,11 +306,11 @@
       const effective = normalized.filter((item) => item.totalExistencias > 0).length;
       const zeroTotal = normalized.filter((item) => item.totalExistencias === 0).length;
       const summary = {
-        rawRows: normalized.length,
-        normalizedRows: normalized.length,
-        coordinateRows: mapped.length,
+        rawRows: Number(sourceReport.rowsRead ?? normalized.length),
+        normalizedRows: Number(sourceReport.validProducers ?? normalized.length),
+        coordinateRows: Number(sourceReport.withValidCoordinates ?? mapped.length),
         coordinateRowsOutsideProvince: outsideCorrientes,
-        missingCoordinates: normalized.length - withCoordinates.length,
+        missingCoordinates: Number(sourceReport.withoutCoordinates ?? (normalized.length - withCoordinates.length)),
         effectiveRows: effective,
         zeroTotalRows: zeroTotal,
         negativeTotalRows: normalized.filter((item) => item.totalExistencias < 0).length,
