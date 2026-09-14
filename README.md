@@ -52,6 +52,23 @@ Si la fuente interna no está configurada, el mapa muestra la base cartográfica
 
 El contrato de normalización acepta un array o `{ "records": [...] }` y detecta aliases como `UP_RENSPA`, `LATITUD`, `LONGITUD`, `DEPTO`, `MUNI`, `OFICINA LOCAL`, totales por especie y categorías ganaderas. El identificador se muestra enmascarado; nunca se renderiza titularidad, DNI, CUIT/CUIL, contacto o dirección.
 
+## Pipeline local de productores
+
+La base original debe colocarse en una ruta local ignorada, por ejemplo `data/interno/base_original.xlsx` o `data/interno/base_original.csv`. El transformador no imprime filas ni identificadores; genera el archivo que consume el artefacto interno y un reporte local:
+
+```powershell
+node scripts/build-producer-data.mjs "./data/interno/base_original.xlsx"
+```
+
+Salidas predeterminadas:
+
+- `dist/data/interno/productores.json`: registros operativos normalizados para el mapa.
+- `dist/data/interno/reporte_productores.json`: conteos, campos detectados, departamentos, advertencias y exclusiones.
+
+También se admite `--output` y `--report`. Para XLSX se usa el lector local `scripts/read-xlsx-json.py` y `openpyxl`; para CSV/TSV se utiliza el parser incluido, sin instalar dependencias de frontend. Las columnas críticas son identificador o RENSPA, departamento, municipio, latitud y longitud, además de al menos una especie o categoría ganadera. No se inventan columnas ni coordenadas.
+
+El pipeline descarta filas sin coordenadas válidas, con existencias negativas o sin identificación/ubicación administrativa. Conserva los ceros como advertencia, enmascara RENSPA y nunca copia DNI, CUIT, CUIL, titularidad o contactos al JSON de salida. La fuente original, `productores.json` y el reporte no deben subirse al repositorio público.
+
 ## Ejecución local
 
 Desde `senasa-dashboard/`:

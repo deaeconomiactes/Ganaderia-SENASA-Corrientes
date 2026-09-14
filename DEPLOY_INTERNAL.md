@@ -5,8 +5,14 @@ Este artefacto está pensado para un entorno protegido. GitHub Pages sólo debe 
 ## Opción archivo privado
 
 1. Copiar el proyecto a un entorno institucional o privado.
-2. Colocar la fuente autorizada en `dist/data/interno/productores.json`.
-3. Ejecutar:
+2. Colocar la base original en `data/interno/base_original.xlsx` o `.csv`.
+3. Generar la fuente operativa con:
+
+```powershell
+node scripts/build-producer-data.mjs "./data/interno/base_original.xlsx"
+```
+
+4. Ejecutar:
 
 ```powershell
 node scripts/build-config.mjs internal
