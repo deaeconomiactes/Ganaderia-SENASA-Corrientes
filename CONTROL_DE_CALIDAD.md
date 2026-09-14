@@ -29,3 +29,7 @@
 - [ ] Se verificó que no se renderizan titularidad, documentos, contactos ni domicilio
 - [ ] Se comprobó que la ficha muestra sólo el identificador operativo enmascarado
 - [ ] La copia pública vuelve a `PUBLIC_SAFE_MODE: true` antes de cualquier push
+- [ ] Leaflet se carga desde `dist/vendor/leaflet/` y no desde un CDN
+- [ ] El contenedor operativo tiene `height` y `min-height` de 620 px en escritorio
+- [ ] `map.invalidateSize()` se ejecuta después de hacer visible el contenedor
+- [ ] La falla de Leaflet o la ausencia de la base individual muestran un estado visible
