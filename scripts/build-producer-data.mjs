@@ -81,16 +81,17 @@ rows.forEach((row, index) => {
   report.validProducers += 1;
   report.departments[departamento] = (report.departments[departamento] || 0) + 1;
   const sequence = String(index + 1).padStart(6, "0");
-  records.push({
-    id: `UP-${sequence}`,
-    displayId: renspa ? `RENSPA ${maskIdentifier(renspa)}` : `Unidad operativa ${sequence}`,
-    renspaMasked: renspa ? maskIdentifier(renspa) : "",
-    searchKeys: {
+  const searchKeys = Object.fromEntries(Object.entries({
       renspa: normalizeIdentifier(renspa),
       dni: normalizeIdentifier(cleanValue(valueAt(row, fields.dni))),
       cuit_cuil: normalizeIdentifier(cleanValue(valueAt(row, fields.cuitCuil))),
       internal_id: normalizeIdentifier(sourceIdentifier),
-    },
+    }).filter(([, value]) => value));
+  records.push({
+    id: `UP-${sequence}`,
+    displayId: renspa ? `RENSPA ${maskIdentifier(renspa)}` : `Unidad operativa ${sequence}`,
+    renspaMasked: renspa ? maskIdentifier(renspa) : "",
+    searchKeys,
     lat, lon, departamento, municipio,
     oficinaLocal: cleanValue(valueAt(row, fields.oficina)),
     paraje: cleanValue(valueAt(row, fields.paraje)),

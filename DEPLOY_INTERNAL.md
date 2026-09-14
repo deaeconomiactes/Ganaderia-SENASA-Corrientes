@@ -25,7 +25,13 @@ total cero” para auditar registros sin existencias. Para diagnosticar una carg
   que no muestre puntos, editar temporalmente `config.internal.js` y cambiar
 `DEBUG_MAP` a `true`; luego revisar la consola del navegador por el resumen
 “Fuente interna normalizada”, “Filtrado operativo por etapas” y “Marcadores
-  operativos renderizados”. Los conteos se informan sin identificadores.
+operativos renderizados”. Los conteos se informan sin identificadores.
+
+La selección usa una única función (`selectProducer`) desde marcador, ranking,
+cluster o búsqueda. `selectedProducerLayer` dibuja un marcador destacado por
+encima de los clusters, abre el popup y muestra la ficha lateral. Si varios
+productores comparten coordenadas, se conserva la ubicación original y se
+informa “Ubicación compartida por N productores”.
 
 La vista interna oculta “Vista pública” y prioriza los slicers de especie
 ganadera, departamento, municipio y oficina local. Categoría, mínimo de

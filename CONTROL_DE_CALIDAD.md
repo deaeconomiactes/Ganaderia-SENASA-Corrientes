@@ -41,5 +41,8 @@
 - [ ] Los filtros primarios muestran especie ganadera, departamento, municipio y oficina local
 - [ ] “Filtros avanzados” inicia cerrado y “Limpiar filtros” restaura especie, ubicación, categoría, rango, ceros, selección y vista
 - [ ] Cada cluster se puede inspeccionar desde el panel lateral y permite seleccionar una unidad
+- [ ] Mapa, ranking, cluster y búsqueda pasan por `selectProducer()`
+- [ ] `selectedProducerLayer` queda por encima de clusters y markers normales
+- [ ] Productores con coordenadas compartidas muestran aviso sin alterar coordenadas
 - [ ] El localizador interno normaliza RENSPA/DNI/CUIT/CUIL sin imprimir ni mostrar el valor completo
 - [ ] `searchKeys` sólo existe en la salida interna ignorada y nunca en JSON agregado público
