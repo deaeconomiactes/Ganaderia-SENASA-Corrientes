@@ -12,7 +12,7 @@ Dashboard web institucional para explorar existencias ganaderas de Corrientes co
 - La fuente no informa fecha de corte; el tablero lo muestra como advertencia y no infiere evolución temporal.
 - La fecha de actualización del dashboard se mantiene explícita en `dist/config.js`, separada de la fecha de actualización de la fuente.
 
-La auditoría interna de `Existencia Corrientes 7-9.xlsx` identificó aproximadamente 67.457 filas de unidad/UP_RENSPA, 67.351 coordenadas plausibles, 106 coordenadas inválidas, 26 departamentos, 246 municipios y 28 oficinas locales. La fuente contiene identificadores, titularidad, documentos, contactos y coordenadas; por eso no se copia al build público ni al repositorio.
+La auditoría interna de `Existencia Corrientes 7-9.xlsx` identificó aproximadamente 67.457 filas de unidad/UP_RENSPA, 67.351 coordenadas plausibles, 106 coordenadas inválidas, 26 departamentos, 246 municipios y 28 oficinas locales. La fuente contiene identificadores, titularidad, documentos, contactos y coordenadas; por eso no se copia al build público ni al repositorio. No contiene un campo explícito de estado que permita afirmar por sí solo qué unidad es un “productor efectivo”; el modo interno debe aplicar esa regla de negocio antes de mostrar puntos.
 
 ## Capas cartográficas y lectura del mapa
 
