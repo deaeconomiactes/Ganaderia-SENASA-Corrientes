@@ -19,6 +19,14 @@ node scripts/build-config.mjs internal
 python -m http.server 8000 --directory dist
 ```
 
+El modo interno aplica por defecto el filtro `totalExistencias > 0` y selecciona
+Bovinos. En los controles del mapa se puede activar “Incluir productores con
+total cero” para auditar registros sin existencias. Para diagnosticar una carga
+que no muestre puntos, editar temporalmente `config.internal.js` y cambiar
+`DEBUG_MAP` a `true`; luego revisar la consola del navegador por el resumen
+“Fuente interna normalizada”, “Filtrado operativo por etapas” y “Marcadores
+operativos renderizados”. Los conteos se informan sin identificadores.
+
 Para producción, reemplazar el servidor de prueba por un servidor institucional con autenticación, intranet o proxy de acceso.
 
 ## Opción API protegida
@@ -36,5 +44,10 @@ La API debe autenticar al usuario, registrar auditoría y devolver sólo los cam
 - Confirmar que el dominio exige login o está dentro de la intranet.
 - Confirmar que `dist/config.js` indica `APP_MODE: "internal"`.
 - Confirmar que aparece “Modo interno operativo” y “Datos internos cargados”.
+- Con `DEBUG_MAP: true`, confirmar que `final` del filtrado operativo es mayor
+  que cero para el corte esperado y que `markerGroups` también es mayor que cero.
+- Si `final` es cero, el mapa muestra “No hay productores visibles para los
+  filtros seleccionados.” y los conteos por etapa permiten identificar si el
+  recorte ocurrió por especie, territorio, categoría o mínimo de existencias.
 - Confirmar que la fuente individual no está en el repositorio público.
 - No reutilizar el artefacto interno en el workflow de GitHub Pages.

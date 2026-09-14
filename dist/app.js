@@ -7,6 +7,7 @@
     ["caprinos", "Caprinos", "#b694ef"],
     ["ovinos", "Ovinos", "#8dcf72"],
   ];
+  const PRODUCER_CATEGORIES = ["vacas", "vaquillonas", "novillos", "novillitos", "terneros", "terneras", "toros", "bueyes", "bufalas"];
   const MAP_VIEW = "0 0 800 620";
   const formatNumber = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 });
   const formatDecimal = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -19,7 +20,11 @@
   const APP_CONFIG = window.APP_CONFIG || {};
   const SECURE_LOCATOR_ENDPOINT = window.APP_CONFIG?.SECURE_LOCATOR_ENDPOINT || null;
   let internalProducerLookup = [];
-  const mapDebug = (...args) => { if (APP_CONFIG.DEBUG_MAP === true) console.info("[SENASA mapa]", ...args); };
+  const mapDebug = (...args) => {
+    if (APP_CONFIG.DEBUG_MAP !== true) return;
+    const safeArgs = args.map((item) => item && typeof item === "object" ? JSON.stringify(item) : String(item));
+    console.info(`[SENASA mapa] ${safeArgs.join(" ")}`);
+  };
   setupNavigation();
   loadData();
 
@@ -282,15 +287,40 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const normalized = normalizeProducerData(await response.json());
       internalProducerLookup = normalized;
-      const mapped = normalized.filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon) && item.lat >= -90 && item.lat <= 90 && item.lon >= -180 && item.lon <= 180);
-      mapDebug("Productores cargados:", normalized.length, "con coordenadas válidas:", mapped.length);
-      return { records: mapped, allRecords: normalized, message: mapped.length ? "Datos internos cargados." : "No se pudo cargar la fuente interna. Contacte al administrador del dashboard." };
-    } catch (_error) {
+      const withCoordinates = normalized.filter((item) => validCoordinatePair(item.lat, item.lon));
+      const outsideCorrientes = withCoordinates.filter((item) => !isCorrientesCoordinate(item.lat, item.lon)).length;
+      // A coordinate can be valid even when it falls outside the provincial
+      // envelope (for example, a neighboring-office record). Keep it for the
+      // operational view and expose the count as a diagnostic instead of
+      // silently dropping producers.
+      const mapped = withCoordinates;
+      const effective = normalized.filter((item) => item.totalExistencias > 0).length;
+      const zeroTotal = normalized.filter((item) => item.totalExistencias === 0).length;
+      const summary = {
+        rawRows: normalized.length,
+        normalizedRows: normalized.length,
+        coordinateRows: mapped.length,
+        coordinateRowsOutsideProvince: outsideCorrientes,
+        missingCoordinates: normalized.length - withCoordinates.length,
+        effectiveRows: effective,
+        zeroTotalRows: zeroTotal,
+        negativeTotalRows: normalized.filter((item) => item.totalExistencias < 0).length,
+        departments: countValues(normalized, "departamento"),
+        speciesRows: Object.fromEntries(SPECIES.map(([key]) => [key, normalized.filter((item) => speciesValue(item, key) > 0).length])),
+      };
+      mapDebug("Fuente interna normalizada", summary);
+      return { records: mapped, allRecords: normalized, summary, message: mapped.length ? "Datos internos cargados." : "No se pudo cargar la fuente interna. Contacte al administrador del dashboard." };
+    } catch (error) {
       internalProducerLookup = [];
-      mapDebug("No se pudo cargar la fuente interna.");
-      return { records: [], message: "No se pudo cargar la fuente interna. Contacte al administrador del dashboard." };
+      mapDebug("No se pudo cargar la fuente interna.", { message: error?.message || "Error desconocido" });
+      return { records: [], allRecords: [], summary: { rawRows: 0, normalizedRows: 0, coordinateRows: 0 }, message: "No se pudo cargar la fuente interna. Contacte al administrador del dashboard." };
     }
   }
+
+  function validCoordinatePair(lat, lon) { return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180; }
+  function isCorrientesCoordinate(lat, lon) { return validCoordinatePair(lat, lon) && lat >= -31.5 && lat <= -26 && lon >= -60.8 && lon <= -55; }
+  function countValues(rows, key) { return new Set(rows.map((item) => safeText(item?.[key])).filter(Boolean)).size; }
+  function speciesValue(item, key) { const normalized = normalizeSpeciesKey(key); return positiveNumber(item?.especies?.[normalized || key]); }
 
   function normalizeProducerData(rawData) {
     const rows = Array.isArray(rawData) ? rawData : (rawData?.records || rawData?.rows || rawData?.data || []);
@@ -298,22 +328,41 @@
     const fields = detectLivestockFields(rows);
     return rows.map((row, index) => {
       const get = (name) => row?.[fields[name]];
-      const species = Object.fromEntries(Object.entries(fields.species).map(([key, field]) => [key, positiveNumber(row?.[field])]).filter(([, value]) => value > 0));
-      const categories = Object.fromEntries(Object.entries(fields.categories).map(([key, field]) => [key, positiveNumber(row?.[field])]).filter(([, value]) => value > 0));
-      const totalFromParts = Object.values(species).reduce((total, value) => total + value, 0) || Object.values(categories).reduce((total, value) => total + value, 0);
+      // Always emit the canonical keys. The internal pipeline already writes
+      // normalized keys, while older exports may use accents, spaces or
+      // singular labels. Keeping zeros explicit prevents a missing key from
+      // being interpreted as a missing species during filtering.
+      const species = Object.fromEntries(SPECIES.map(([key]) => [key, positiveNumber(readLivestockValue(row, "especies", key, fields.species[key]))]));
+      const categories = Object.fromEntries(PRODUCER_CATEGORIES.map((key) => [key, positiveNumber(readLivestockValue(row, "categorias", key, fields.categories[key]))]));
+      const totalFromSpecies = Object.values(species).reduce((total, current) => total + current, 0);
+      const totalFromCategories = Object.values(categories).reduce((total, current) => total + current, 0);
+      const totalFromParts = totalFromSpecies || totalFromCategories;
       const id = safeOperationalId(get("id"), index);
       const rawRenspa = get("renspa");
+      const declaredTotal = numericValue(get("total"));
+      const totalExistencias = declaredTotal > 0 ? declaredTotal : totalFromParts;
+      const maskedRenspa = safeText(row?.renspaMasked);
+      const existingDisplayId = safeText(row?.displayId);
       return {
         id,
-        displayId: rawRenspa ? `RENSPA ${maskIdentifier(rawRenspa)}` : `Unidad ${id}`,
-        renspaMasked: rawRenspa ? maskIdentifier(rawRenspa) : "",
+        displayId: rawRenspa ? `RENSPA ${maskIdentifier(rawRenspa)}` : existingDisplayId || (maskedRenspa ? `RENSPA ${maskedRenspa}` : `Unidad ${id}`),
+        renspaMasked: rawRenspa ? maskIdentifier(rawRenspa) : maskedRenspa,
         lat: parseCoordinate(get("lat")), lon: parseCoordinate(get("lon")),
         departamento: safeText(get("departamento")), municipio: safeText(get("municipio")), oficinaLocal: safeText(get("oficina")),
-        totalExistencias: positiveNumber(get("total")) || totalFromParts,
+        totalExistencias,
         especies: species, categorias: categories, rawSafe: {},
         searchTokens: [get("id"), rawRenspa, get("internalId")].filter(Boolean).map(normalizeIdentifier),
       };
     });
+  }
+
+  function readLivestockValue(row, collectionName, canonical, flatField) {
+    const collection = row?.[collectionName];
+    if (collection && typeof collection === "object" && !Array.isArray(collection)) {
+      const key = Object.keys(collection).find((candidate) => canonicalKey(candidate) === canonicalKey(canonical));
+      if (key !== undefined) return collection[key];
+    }
+    return flatField ? row?.[flatField] : undefined;
   }
 
   function detectLivestockFields(rows) {
@@ -333,7 +382,26 @@
   }
 
   function canonicalKey(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
-  function positiveNumber(value) { const number = typeof value === "number" ? value : Number(String(value ?? "").trim().replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", ".")); return Number.isFinite(number) && number > 0 ? number : 0; }
+  function normalizeSpeciesKey(value) {
+    const key = canonicalKey(value);
+    const aliases = {
+      bovinos: ["bovinos", "bovino", "bov", "bovine"],
+      bubalinos: ["bubalinos", "bubalino", "bufalos", "bufalo", "bufalas", "bufala", "buffalo"],
+      equinos: ["equinos", "equino", "caballos", "caballo", "equine"],
+      porcinos: ["porcinos", "porcino", "cerdos", "cerdo", "swine"],
+      caprinos: ["caprinos", "caprino", "cabras", "cabra", "goat"],
+      ovinos: ["ovinos", "ovino", "ovejas", "oveja", "sheep"],
+    };
+    return Object.entries(aliases).find(([, values]) => values.includes(key))?.[0] || "";
+  }
+  function numericValue(value) {
+    if (typeof value === "number") return Number.isFinite(value) ? value : NaN;
+    const text = String(value ?? "").trim();
+    if (!text) return NaN;
+    const number = Number(text.replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", "."));
+    return Number.isFinite(number) ? number : NaN;
+  }
+  function positiveNumber(value) { const number = numericValue(value); return Number.isFinite(number) && number > 0 ? number : 0; }
   function parseCoordinate(value) { const number = Number(String(value ?? "").trim().replace(",", ".")); return Number.isFinite(number) && Math.abs(number) > 0.01 && Math.abs(number) <= 180 ? number : NaN; }
   function safeText(value) { return String(value || "").trim().slice(0, 120); }
   function safeOperationalId(value, index) { const id = safeText(value).replace(/[^A-Za-z0-9._-]/g, "").slice(0, 32); return id || `OP-${String(index + 1).padStart(5, "0")}`; }
@@ -347,20 +415,21 @@
     if (producerMap.offsetHeight < 1) producerMap.style.minHeight = "620px";
     mapDebug("Contenedor #producerMap encontrado; alto:", producerMap.offsetHeight || "pendiente");
     $("#territoryMap").hidden = true; $("#mapLegend").hidden = true; $("#selectionInsight").hidden = true;
-    $("#mapLevelControl").hidden = true; $("#producerCategoryControl").hidden = false; $("#producerRangeControl").hidden = false;
+    $("#mapLevelControl").hidden = true; $("#producerCategoryControl").hidden = false; $("#producerRangeControl").hidden = false; $("#includeZeroStockControl").hidden = false;
     setText("#metricRecordsLabel", "UNIDADES PRODUCTIVAS"); setText("#metricMapUnitLabel", "PRODUCTORES GEOREFERENCIADOS"); setText("#metricMapUnitNote", "Uso interno · según filtros");
     setText("#mapLayerContext", "Puntos operativos sobre mapa base · uso interno autorizado");
     setText("#mapFooterNotice", "Puntos operativos con coordenadas de la fuente interna; validar precisión y no publicar.");
     setText("#traceGrain", "Unidad productiva · punto georreferenciado"); setText("#tracePrivacy", "Modo interno autorizado. No publicar identificadores, contactos ni coordenadas sin control de acceso.");
     document.querySelector(".senasa-nav-note")?.replaceChildren(Object.assign(document.createElement("span"), { className: "status-dot" }), document.createTextNode("Modo interno operativo"));
     const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = source.records?.length ? "<strong>Modo interno operativo</strong> · Datos internos cargados. No publicar sin autenticación ni control de acceso." : "<strong>Modo interno operativo</strong> · No se pudo cargar la fuente interna. Contacte al administrador del dashboard.";
-    const state = { data, filters: readGlobalFilters(), category: "", minStock: 0, selected: null, records: source.records || [], map: null, markerLayer: null, boundaryLayer: null };
+    const state = { data, filters: readGlobalFilters(), category: "", minStock: 0, includeZeroStock: false, selected: null, records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, map: null, markerLayer: null, boundaryLayer: null, diagnostics: null, speciesWarning: "" };
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
-    syncLocationControls(data, state.filters, controls);
-    bindLocationControls(data, state.filters, controls, () => { state.selected = null; renderOperationalTerritory(data, state); });
+    syncOperationalLocationControls(state.records, state.filters, controls);
+    bindOperationalLocationControls(state.records, state.filters, controls, () => { state.selected = null; renderOperationalTerritory(data, state); });
     populateOperationalCategories(state.records);
     $("#producerCategorySelect")?.addEventListener("change", (event) => { state.category = event.target.value; state.selected = null; renderOperationalTerritory(data, state); });
     $("#producerMinStock")?.addEventListener("input", (event) => { state.minStock = positiveNumber(event.target.value); state.selected = null; renderOperationalTerritory(data, state); });
+    $("#includeZeroStock")?.addEventListener("change", (event) => { state.includeZeroStock = Boolean(event.target.checked); state.selected = null; renderOperationalTerritory(data, state); });
     $("#resetMapViewButton")?.addEventListener("click", () => { state.selected = null; const bounds = state.boundaryLayer?.getBounds?.(); if (bounds?.isValid?.()) state.map.fitBounds(bounds, { padding: [26, 26] }); renderOperationalTerritory(data, state); });
     $("#closeProducerDetailButton")?.addEventListener("click", () => { state.selected = null; renderOperationalTerritory(data, state); });
     if (!window.L) { mapDebug("Leaflet no disponible."); showOperationalEmpty("Leaflet no está disponible o falló la inicialización."); return; }
@@ -468,15 +537,36 @@
   }
 
   function operationalRows(state) {
-    const filters = state.filters;
-    return state.records.filter((item) => {
-      const speciesOk = !filters.species || filters.species === "all" || positiveNumber(item.especies?.[filters.species]) > 0;
-      const departmentOk = filters.department === "all" || !filters.department || item.departamento === filters.department;
-      const municipalityOk = !filters.municipality || item.municipio === filters.municipality;
-      const officeOk = !filters.office || item.oficinaLocal === filters.office;
-      const categoryOk = !state.category || positiveNumber(item.categorias?.[state.category]) > 0;
-      return speciesOk && departmentOk && municipalityOk && officeOk && categoryOk && item.totalExistencias >= state.minStock;
-    });
+    const filters = state.filters || defaultFilters();
+    filters.species = normalizeSpeciesKey(filters.species) || "bovinos";
+    const all = state.records || [];
+    const effective = state.includeZeroStock ? all : all.filter((item) => Number(item.totalExistencias) > 0);
+    const selectedSpecies = filters.species === "all" ? "" : normalizeSpeciesKey(filters.species);
+    const speciesAvailable = !selectedSpecies || effective.some((item) => speciesValue(item, selectedSpecies) > 0);
+    state.speciesWarning = selectedSpecies && !speciesAvailable ? `La fuente interna no contiene valores positivos para ${speciesLabel(selectedSpecies)}.` : "";
+    const bySpecies = !selectedSpecies || !speciesAvailable ? effective : effective.filter((item) => speciesValue(item, selectedSpecies) > 0 || (state.includeZeroStock && Number(item.totalExistencias) === 0));
+    const byDepartment = bySpecies.filter((item) => filters.department === "all" || !filters.department || item.departamento === filters.department);
+    const byMunicipality = byDepartment.filter((item) => !filters.municipality || item.municipio === filters.municipality);
+    const byOffice = byMunicipality.filter((item) => !filters.office || item.oficinaLocal === filters.office);
+    const byCategory = byOffice.filter((item) => !state.category || positiveNumber(item.categorias?.[state.category]) > 0);
+    const rows = byCategory.filter((item) => Number(item.totalExistencias) >= Number(state.minStock || 0));
+    state.diagnostics = {
+      raw: Number(state.sourceSummary?.rawRows ?? state.allRecords?.length ?? all.length),
+      normalized: Number(state.sourceSummary?.normalizedRows ?? state.allRecords?.length ?? all.length),
+      coordinates: Number(state.sourceSummary?.coordinateRows ?? all.length),
+      effective: effective.length,
+      species: bySpecies.length,
+      department: byDepartment.length,
+      municipality: byMunicipality.length,
+      office: byOffice.length,
+      category: byCategory.length,
+      final: rows.length,
+      selectedSpecies: selectedSpecies || "all",
+      includeZeroStock: Boolean(state.includeZeroStock),
+      minStock: Number(state.minStock || 0),
+    };
+    mapDebug("Filtrado operativo por etapas", state.diagnostics);
+    return rows;
   }
 
   function renderOperationalTerritory(data, state) {
@@ -488,10 +578,27 @@
     renderOperationalPanel(rows, state);
     renderOperationalFilterChips(state, rows.length);
     setText("#selectionStatus", state.selected ? `Unidad seleccionada · ${state.selected.displayId}` : `${formatNumber.format(rows.length)} productores georreferenciados visibles · seleccione un punto para ver el detalle.`);
+    const warning = $("#internalFilterWarning");
+    if (warning) { warning.hidden = !state.speciesWarning; warning.textContent = state.speciesWarning; }
     setText("#selectedSummary", `${formatNumber.format(rows.length)} puntos visibles`);
     setText("#tableSummary", state.records.length ? "La tabla pública conserva el resumen agregado." : "Sin fuente individual georreferenciada.");
+    updateOperationalEmptyState(state, rows.length);
     const sourceData = data || state.data || {};
     renderQualitySummary(sourceData, state.filters, filterRows(sourceData.municipios || [], state.filters));
+  }
+
+  function updateOperationalEmptyState(state, visibleCount) {
+    const empty = $("#producerMapEmpty");
+    if (!empty || !state.map) return;
+    if (!state.records.length) {
+      showOperationalEmpty("No se pudo cargar la fuente interna. Contacte al administrador del dashboard.");
+      return;
+    }
+    if (!visibleCount) {
+      showOperationalEmpty("No hay productores visibles para los filtros seleccionados.");
+      return;
+    }
+    empty.hidden = true;
   }
 
   function renderOperationalMetrics(rows, state) {
@@ -515,6 +622,7 @@
     const limit = Number(APP_CONFIG.INTERNAL_MAX_MARKERS || 800);
     const shouldCluster = rows.length > limit;
     const groups = shouldCluster ? makeOperationalClusters(rows, state.map.getZoom()) : rows.map((item) => ({ items: [item], lat: item.lat, lon: item.lon }));
+    mapDebug("Marcadores operativos renderizados", { visibleRows: rows.length, markerGroups: groups.length, clustered: shouldCluster, zoom: state.map.getZoom() });
     groups.forEach((group) => {
       if (group.items.length > 1) {
         const marker = L.marker([group.lat, group.lon], { icon: L.divIcon({ className: "", html: `<span class="producer-cluster">${formatNumber.format(group.items.length)}</span>`, iconSize: [38, 38], iconAnchor: [19, 19] }) });
@@ -542,7 +650,10 @@
   function markerRadius(value, rows) { const max = Math.max(...rows.map((item) => item.totalExistencias), 1); return Math.round(10 + Math.min(12, Math.sqrt(Math.max(0, value) / max) * 12)); }
   function speciesColor(species) { return ({ bovinos: "#2e8d89", bubalinos: "#b17841", ovinos: "#6d91ad", caprinos: "#8b72a5", porcinos: "#9c6472", equinos: "#597d92" })[species] || "#2e8d89"; }
   function producerTooltip(item) { return `<div class="producer-popup"><strong>${escapeHtml(item.displayId)}</strong><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(item.totalExistencias)}</b> existencias · ${escapeHtml(titleCase(dominantProducerSpecies(item)))}</span></div>`; }
-  function dominantProducerSpecies(item) { return Object.entries(item.especies || {}).sort((a, b) => b[1] - a[1])[0]?.[0] || "sin especie informada"; }
+  function dominantProducerSpecies(item) {
+    const dominant = Object.entries(item.especies || {}).sort((a, b) => b[1] - a[1])[0];
+    return dominant && Number(dominant[1]) > 0 ? dominant[0] : "sin especie informada";
+  }
 
   function selectOperationalProducer(item, state) {
     state.selected = item;
@@ -578,7 +689,7 @@
 
   function renderOperationalFilterChips(state, count) {
     const target = $("#territoryFilterChips"); if (!target) return;
-    const labels = [["Especie", state.filters.species && state.filters.species !== "all" ? speciesLabel(state.filters.species) : "Todas"], ["Departamento", state.filters.department !== "all" ? state.filters.department : "Toda la provincia"], ["Municipio", state.filters.municipality], ["Oficina", state.filters.office], ["Categoría", state.category], ["Mínimo", state.minStock ? `${formatNumber.format(state.minStock)} cabezas` : ""]].filter(([, value]) => value);
+    const labels = [["Especie", state.filters.species && state.filters.species !== "all" ? speciesLabel(state.filters.species) : "Todas"], ["Departamento", state.filters.department !== "all" ? state.filters.department : "Toda la provincia"], ["Municipio", state.filters.municipality], ["Oficina", state.filters.office], ["Categoría", state.category], ["Mínimo", state.minStock ? `${formatNumber.format(state.minStock)} cabezas` : ""], ["Cero", state.includeZeroStock ? "Incluidos" : ""]].filter(([, value]) => value);
     target.innerHTML = `<span class="filter-count">${formatNumber.format(count)} visibles</span>${labels.map(([label, value]) => `<span class="operational-filter-chip">${escapeHtml(label)}: ${escapeHtml(value)}</span>`).join("")}`;
   }
 
@@ -586,7 +697,8 @@
     const empty = $("#producerMapEmpty"); if (!empty) return;
     const text = message || "No se encontró la fuente interna de productores. Contacte al administrador del dashboard.";
     const failed = /Leaflet|inicializaci[oó]n|cargar el mapa/i.test(text);
-    empty.hidden = false; empty.innerHTML = `<div><h3>${failed ? "No se pudo cargar el mapa" : "Modo interno preparado"}</h3><p>${escapeHtml(text)}</p></div>`;
+    const noVisible = /No hay productores visibles/i.test(text);
+    empty.hidden = false; empty.innerHTML = `<div><h3>${failed ? "No se pudo cargar el mapa" : noVisible ? "Sin productores visibles" : "Modo interno preparado"}</h3><p>${escapeHtml(text)}</p></div>`;
   }
 
   function renderTerritory(data, state) {
@@ -1000,7 +1112,7 @@
   function readGlobalFilters() {
     try {
       const stored = JSON.parse(sessionStorage.getItem("senasa-corrientes-filters-v1") || "{}");
-      return { ...defaultFilters(), ...stored, species: SPECIES.some(([key]) => key === stored.species) ? stored.species : "bovinos" };
+      return { ...defaultFilters(), ...stored, species: normalizeSpeciesKey(stored.species) || "bovinos" };
     } catch { return defaultFilters(); }
   }
 
@@ -1044,6 +1156,45 @@
       if (!controls.office.value) { filters.office = ""; update(); return; }
       const [department, municipality, office] = parseLocationValue(controls.office.value);
       filters.department = department; filters.municipality = municipality; filters.office = office; update();
+    });
+  }
+
+  // The internal producer feed has a different grain from the public
+  // municipality aggregate. Build its slicers from the same records that are
+  // rendered on the map, so a public-only value cannot hide every marker.
+  function syncOperationalLocationControls(records, filters, controls) {
+    const rows = records || [];
+    const departments = [...new Set(rows.map((item) => item.departamento).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+    if (filters.department !== "all" && !departments.includes(filters.department)) { filters.department = "all"; filters.municipality = ""; filters.office = ""; }
+    const departmentRows = rows.filter((item) => filters.department === "all" || item.departamento === filters.department);
+    const municipalities = [...new Set(departmentRows.map((item) => item.municipio).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+    if (filters.municipality && !municipalities.includes(filters.municipality)) { filters.municipality = ""; filters.office = ""; }
+    const municipalityRows = departmentRows.filter((item) => !filters.municipality || item.municipio === filters.municipality);
+    const offices = [...new Set(municipalityRows.map((item) => item.oficinaLocal).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+    if (filters.office && !offices.includes(filters.office)) filters.office = "";
+    if (controls.species) controls.species.innerHTML = SPECIES.map(([key, label]) => `<option value="${key}">${label}</option>`).join("");
+    if (controls.department) controls.department.innerHTML = `<option value="all">Toda la provincia</option>${departments.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(titleCase(name))}</option>`).join("")}`;
+    if (controls.municipality) controls.municipality.innerHTML = `<option value="">Todos los municipios</option>${municipalities.map((name) => `<option value="${locationValue([filters.department, name])}">${escapeHtml(titleCase(name))}${filters.department === "all" ? "" : ""}</option>`).join("")}`;
+    if (controls.office) controls.office.innerHTML = `<option value="">Todas las oficinas</option>${offices.map((name) => `<option value="${locationValue([filters.department, filters.municipality, name])}">${escapeHtml(titleCase(name))}</option>`).join("")}`;
+    if (controls.species) controls.species.value = normalizeSpeciesKey(filters.species) || "bovinos";
+    if (controls.department) controls.department.value = filters.department;
+    if (controls.municipality) controls.municipality.value = filters.municipality ? locationValue([filters.department, filters.municipality]) : "";
+    if (controls.office) controls.office.value = filters.office ? locationValue([filters.department, filters.municipality, filters.office]) : "";
+  }
+
+  function bindOperationalLocationControls(records, filters, controls, onChange) {
+    const update = () => { syncOperationalLocationControls(records, filters, controls); saveGlobalFilters(filters); onChange(); };
+    controls.species?.addEventListener("change", () => { filters.species = normalizeSpeciesKey(controls.species.value) || "bovinos"; update(); });
+    controls.department?.addEventListener("change", () => { filters.department = controls.department.value; filters.municipality = ""; filters.office = ""; update(); });
+    controls.municipality?.addEventListener("change", () => {
+      if (!controls.municipality.value) { filters.municipality = ""; filters.office = ""; update(); return; }
+      const [, municipality] = parseLocationValue(controls.municipality.value);
+      filters.municipality = municipality; filters.office = ""; update();
+    });
+    controls.office?.addEventListener("change", () => {
+      if (!controls.office.value) { filters.office = ""; update(); return; }
+      const [, , office] = parseLocationValue(controls.office.value);
+      filters.office = office; update();
     });
   }
 
