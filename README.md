@@ -44,11 +44,11 @@ El repositorio y GitHub Pages no deben contener el XLSX original, RENSPA, DNI, C
 
 ## Modo interno operativo
 
-El mapa operativo usa Leaflet/OpenStreetMap y puede representar unidades productivas como puntos, con clustering, filtros por especie/departamento/municipio/oficina/categoría, rango mínimo de existencias, ranking y ficha desagregada. La base pública no contiene esos registros; el artefacto interno se configura una sola vez por el administrador y el jefe sólo recibe el enlace protegido.
+El mapa operativo usa Leaflet/OpenStreetMap y representa unidades productivas como puntos, con clusters inspectables, filtros primarios por especie ganadera/departamento/municipio/oficina y un bloque avanzado (categoría, existencias mínimas e inclusión de ceros). El ranking, el localizador interno y los puntos del mapa comparten la misma selección: al seleccionar una fila se centra el mapa, se resalta el marcador y se abre la ficha desagregada. La base pública no contiene esos registros; el artefacto interno se configura una sola vez por el administrador y el jefe sólo recibe el enlace protegido.
 
 Para probar una copia local controlada, el administrador ejecuta `node scripts/build-config.mjs internal`, coloca la fuente protegida en `dist/data/interno/productores.json` o configura un endpoint seguro, y sirve `dist/`. Esto no debe hacerse sobre el artefacto que se subirá a GitHub Pages. Las coordenadas co-localizadas deben validarse y agruparse antes de uso operativo; no se afirma que sean precisión predial sin metadata de origen.
 
-Si la fuente interna no está configurada, el mapa muestra la base cartográfica de Corrientes con el aviso “Modo interno preparado” y el mensaje “No se encontró la fuente interna de productores. Contacte al administrador del dashboard.” Si Leaflet falla, el contenedor muestra “No se pudo cargar el mapa” en lugar de quedar blanco. Para diagnóstico temporal puede activarse `DEBUG_MAP: true`; los logs sólo informan estado, conteos y cantidad de coordenadas válidas, nunca identificadores.
+Si la fuente interna no está configurada, el mapa muestra la base cartográfica de Corrientes con el aviso “Modo interno preparado” y el mensaje “No se encontró la fuente interna de productores. Contacte al administrador del dashboard.” Si Leaflet falla, el contenedor muestra “No se pudo cargar el mapa” en lugar de quedar blanco. Para diagnóstico temporal puede activarse `DEBUG_MAP: true`; los logs sólo informan estado, conteos y cantidad de coordenadas válidas, nunca identificadores. En modo interno no se muestra el selector “Vista pública”: la vista prioriza especie ganadera y ubicación administrativa, mientras que “Filtros avanzados” permanece cerrado hasta que se necesite.
 
 El contrato de normalización acepta un array o `{ "records": [...] }` y detecta aliases como `UP_RENSPA`, `LATITUD`, `LONGITUD`, `DEPTO`, `MUNI`, `OFICINA LOCAL`, totales por especie y categorías ganaderas. El identificador se muestra enmascarado; nunca se renderiza titularidad, DNI, CUIT/CUIL, contacto o dirección.
 
@@ -101,7 +101,7 @@ El workflow de GitHub Pages nunca ejecuta el modo interno y siempre regenera la 
 
 ## Localizador protegido
 
-La interfaz permite elegir RENSPA, DNI, CUIT/CUIL o autodetección, pero no almacena el valor ni lo resuelve desde el frontend estático. Para Modo B, configurar `SECURE_LOCATOR_ENDPOINT` en `dist/config.js` y conectar un endpoint HTTPS autenticado que responda únicamente departamento, municipio, oficina local, grilla agregada y un mensaje de autorización. El servicio debe aplicar RBAC, rate limiting, auditoría y minimización de logs.
+La interfaz permite elegir RENSPA, DNI, CUIT/CUIL, ID interno o autodetección. En un build interno sin endpoint, el transformador conserva claves de búsqueda sólo en `data/interno/productores.json` (archivo ignorado) y la UI resuelve la coincidencia en memoria; el RENSPA se normaliza quitando espacios, puntos, guiones y barras, pero se muestra siempre enmascarado. En modo público el formulario nunca resuelve identificadores y sólo muestra el mensaje de función restringida. Para Modo B, configurar `SECURE_LOCATOR_ENDPOINT` en `dist/config.js` y conectar un endpoint HTTPS autenticado que responda únicamente departamento, municipio, oficina local, grilla agregada y un mensaje de autorización. El servicio debe aplicar RBAC, rate limiting, auditoría y minimización de logs.
 
 ## Escenarios económicos
 

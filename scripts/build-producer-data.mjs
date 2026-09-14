@@ -62,10 +62,12 @@ rows.forEach((row, index) => {
   if (sourceIdentifier) seenIdentifiers.add(sourceIdentifier);
   const lat = parseCoordinate(valueAt(row, fields.lat), "lat");
   const lon = parseCoordinate(valueAt(row, fields.lon), "lon");
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) { report.withoutCoordinates += 1; return; }
-  report.withValidCoordinates += 1;
+  const coordinatesValid = Number.isFinite(lat) && Number.isFinite(lon);
+  if (!coordinatesValid) report.withoutCoordinates += 1;
+  else report.withValidCoordinates += 1;
   const rawNumericValues = [...SPECIES.map((species) => parseNumeric(valueAt(row, fields.species[species]))), ...CATEGORIES.map((category) => parseNumeric(valueAt(row, fields.categories[category])))];
   if (rawNumericValues.some((value) => Number.isFinite(value) && value < 0)) { report.negativeExistenceRows += 1; return; }
+  if (!coordinatesValid) return;
   const values = {
     especies: Object.fromEntries(SPECIES.map((species) => [species, positiveNumber(valueAt(row, fields.species[species]))])),
     categorias: Object.fromEntries(CATEGORIES.map((category) => [category, positiveNumber(valueAt(row, fields.categories[category]))])),
@@ -83,6 +85,12 @@ rows.forEach((row, index) => {
     id: `UP-${sequence}`,
     displayId: renspa ? `RENSPA ${maskIdentifier(renspa)}` : `Unidad operativa ${sequence}`,
     renspaMasked: renspa ? maskIdentifier(renspa) : "",
+    searchKeys: {
+      renspa: normalizeIdentifier(renspa),
+      dni: normalizeIdentifier(cleanValue(valueAt(row, fields.dni))),
+      cuit_cuil: normalizeIdentifier(cleanValue(valueAt(row, fields.cuitCuil))),
+      internal_id: normalizeIdentifier(sourceIdentifier),
+    },
     lat, lon, departamento, municipio,
     oficinaLocal: cleanValue(valueAt(row, fields.oficina)),
     paraje: cleanValue(valueAt(row, fields.paraje)),
@@ -150,14 +158,16 @@ function detectFields(headers) {
   const categoryAliases = { vacas: ["vacas", "vaca"], vaquillonas: ["vaquillonas", "vaquillona"], novillos: ["novillos", "novillo"], novillitos: ["novillitos", "novillito"], terneros: ["terneros", "ternero"], terneras: ["terneras", "ternera"], toros: ["toros", "toro"] };
   const id = find(["idproductor", "productorid", "idunidad", "unidadid", "idregistro", "registroid", "codigooperativo", "codigo", "id"]);
   const renspa = find(["renspa", "renspanro", "renspanumero", "uprenspa"]);
-  const recognized = new Set([id, renspa].filter(Boolean).map(canonical));
+  const dni = find(["dni", "documento", "documentonro", "documentonumero"]);
+  const cuitCuil = find(["cuit", "cuil", "cuitcuil", "cuitcuilnro"]);
+  const recognized = new Set([id, renspa, dni, cuitCuil].filter(Boolean).map(canonical));
   const species = Object.fromEntries(Object.entries(speciesAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
   const categories = Object.fromEntries(Object.entries(categoryAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
-  const fields = { idOrRenspa: id || renspa, renspa, departamento: find(["departamento", "depto", "dep"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
+  const fields = { idOrRenspa: id || renspa, id, renspa, dni, cuitCuil, departamento: find(["departamento", "depto", "dep"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
   [fields.departamento, fields.municipio, fields.oficina, fields.paraje, fields.lat, fields.lon, ...Object.values(species), ...Object.values(categories)].filter(Boolean).forEach((field) => recognized.add(canonical(field)));
   return fields;
 }
-function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, renspa: fields.renspa || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories }; }
+function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuitCuil: fields.cuitCuil || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories }; }
 function canonical(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function valueAt(row, field) { return field ? row[field] : ""; }
 function cleanValue(value) { return String(value ?? "").trim().slice(0, 160); }
@@ -166,4 +176,5 @@ function positiveNumber(value) { const number = typeof value === "number" ? valu
 function parseNumeric(value) { const number = typeof value === "number" ? value : Number(String(value ?? "").trim().replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", ".")); return Number.isFinite(number) ? number : NaN; }
 function sum(values) { return values.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0); }
 function maskIdentifier(value) { const parts = String(value).trim().split(/[.\-/\s]+/).filter(Boolean); if (parts.length >= 2) return `${parts.slice(0, -1).join(".")}.****`; const text = parts[0] || ""; return text.length > 4 ? `${text.slice(0, 2)}****` : "****"; }
+function normalizeIdentifier(value) { return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 64); }
 function fail(message) { console.error(`Error: ${message}`); process.exit(1); }

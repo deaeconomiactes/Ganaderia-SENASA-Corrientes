@@ -54,6 +54,11 @@ dist/.openai/
 /dist/data/interno/*
 !/dist/data/interno/README.md
 !/dist/data/interno/productores.example.json
+dist/data/interno/productores.json
+dist/data/interno/reporte_productores.json
+dist/data/interno/*.xlsx
+dist/data/interno/*.csv
+dist/data/interno/*.parquet
 data/interno/productores.json
 data/interno/reporte_productores.json
 data/interno/*.csv

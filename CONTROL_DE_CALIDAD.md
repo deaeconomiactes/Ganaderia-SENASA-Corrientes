@@ -37,3 +37,9 @@
 - [ ] El contenedor operativo tiene `height` y `min-height` de 620 px en escritorio
 - [ ] `map.invalidateSize()` se ejecuta después de hacer visible el contenedor
 - [ ] La falla de Leaflet o la ausencia de la base individual muestran un estado visible
+- [ ] En modo interno no aparece el selector de “Vista pública”
+- [ ] Los filtros primarios muestran especie ganadera, departamento, municipio y oficina local
+- [ ] “Filtros avanzados” inicia cerrado y “Limpiar filtros” restaura especie, ubicación, categoría, rango, ceros, selección y vista
+- [ ] Cada cluster se puede inspeccionar desde el panel lateral y permite seleccionar una unidad
+- [ ] El localizador interno normaliza RENSPA/DNI/CUIT/CUIL sin imprimir ni mostrar el valor completo
+- [ ] `searchKeys` sólo existe en la salida interna ignorada y nunca en JSON agregado público

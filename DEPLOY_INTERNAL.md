@@ -22,10 +22,21 @@ python -m http.server 8000 --directory dist
 El modo interno aplica por defecto el filtro `totalExistencias > 0` y selecciona
 Bovinos. En los controles del mapa se puede activar “Incluir productores con
 total cero” para auditar registros sin existencias. Para diagnosticar una carga
-que no muestre puntos, editar temporalmente `config.internal.js` y cambiar
+  que no muestre puntos, editar temporalmente `config.internal.js` y cambiar
 `DEBUG_MAP` a `true`; luego revisar la consola del navegador por el resumen
 “Fuente interna normalizada”, “Filtrado operativo por etapas” y “Marcadores
-operativos renderizados”. Los conteos se informan sin identificadores.
+  operativos renderizados”. Los conteos se informan sin identificadores.
+
+La vista interna oculta “Vista pública” y prioriza los slicers de especie
+ganadera, departamento, municipio y oficina local. Categoría, mínimo de
+existencias e inclusión de ceros están dentro de “Filtros avanzados” (cerrado
+por defecto). “Limpiar filtros” restaura todo el estado y la vista provincial.
+Los clusters se pueden abrir en el panel lateral para seleccionar una unidad.
+
+El pipeline agrega `searchKeys` normalizadas sólo al JSON interno ignorado.
+El localizador acepta RENSPA, DNI, CUIT/CUIL e ID interno; el RENSPA se busca
+sin espacios, puntos, guiones ni barras y se muestra siempre enmascarado. No
+habilitar esta resolución en un build público.
 
 Para producción, reemplazar el servidor de prueba por un servidor institucional con autenticación, intranet o proxy de acceso.
 
