@@ -441,20 +441,96 @@
     $("#includeZeroStock")?.addEventListener("change", (event) => { state.includeZeroStock = Boolean(event.target.checked); state.selected = null; renderOperationalTerritory(data, state); });
     $("#resetMapViewButton")?.addEventListener("click", () => { state.selected = null; const bounds = state.boundaryLayer?.getBounds?.(); if (bounds?.isValid?.()) state.map.fitBounds(bounds, { padding: [26, 26] }); renderOperationalTerritory(data, state); });
     $("#closeProducerDetailButton")?.addEventListener("click", () => { state.selected = null; renderOperationalTerritory(data, state); });
-    if (!window.L) { mapDebug("Leaflet no disponible."); showOperationalEmpty("Leaflet no está disponible o falló la inicialización."); return; }
-    mapDebug("Leaflet disponible; creando instancia.");
-    state.map = L.map(producerMap, { zoomControl: true, preferCanvas: true, attributionControl: true }).setView([-28.9, -57.9], 7);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap contributors" }).addTo(state.map);
-    if (data.limite_corrientes) state.boundaryLayer = L.geoJSON(data.limite_corrientes, { style: { color: "#3d7478", weight: 1.4, fillColor: "#8db8b7", fillOpacity: .10 } }).addTo(state.map);
-    state.markerLayer = L.layerGroup().addTo(state.map);
-    state.boundaryLayer?.getBounds?.().isValid() && state.map.fitBounds(state.boundaryLayer.getBounds(), { padding: [26, 26] });
-    state.map.on("zoomend", () => renderOperationalMarkers(state));
-    const invalidate = () => state.map?.invalidateSize?.({ pan: false });
-    requestAnimationFrame(() => requestAnimationFrame(invalidate));
-    window.addEventListener("resize", invalidate, { passive: true });
-    state.map.whenReady(() => { invalidate(); mapDebug("Mapa Leaflet inicializado."); });
+    const map = initProducerMap(state, producerMap, data);
+    if (!map) return;
     if (!state.records.length) showOperationalEmpty(source.message);
     renderOperationalTerritory(data, state);
+  }
+
+  function initProducerMap(state, producerMap, data) {
+    const selector = "#producerMap";
+    mapDebug("Leaflet disponible:", Boolean(window.L), "selector:", selector, "container encontrado:", Boolean(producerMap));
+    if (!window.L || !producerMap) {
+      showOperationalEmpty("No se pudo inicializar el mapa operativo. Revise la carga de Leaflet y el contenedor.");
+      return null;
+    }
+    if (state.map) {
+      state.map.remove();
+      state.map = null;
+    }
+    // Leaflet protects containers with an internal id. Clear a stale id only
+    // when this controlled state is being re-initialized.
+    if (producerMap._leaflet_id) {
+      producerMap.replaceChildren();
+      delete producerMap._leaflet_id;
+    }
+    producerMap.hidden = false;
+    const before = producerMap.getBoundingClientRect();
+    mapDebug("Contenedor antes de init", { width: Math.round(before.width), height: Math.round(before.height), children: producerMap.children.length });
+    const map = L.map(producerMap, { zoomControl: true, preferCanvas: true, attributionControl: true }).setView([-28.8, -57.7], 7);
+    state.map = map;
+    state.container = producerMap;
+    mapDebug("Instancia Leaflet creada:", Boolean(state.map));
+
+    const tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap contributors" });
+    state.tileLayer = tileLayer;
+    let tileErrorReported = false;
+    tileLayer.on("load", () => mapDebug("Tile layer cargado: true"));
+    tileLayer.on("tileerror", () => {
+      if (tileErrorReported) return;
+      tileErrorReported = true;
+      mapDebug("Tile layer cargado: false");
+      setText("#mapFooterNotice", "El mapa base no pudo cargar algunos tiles. Revise la conectividad del entorno interno.");
+    });
+    tileLayer.addTo(map);
+    mapDebug("Tile layer agregado: true");
+
+    if (data.limite_corrientes) state.boundaryLayer = L.geoJSON(data.limite_corrientes, { style: { color: "#3d7478", weight: 1.4, fillColor: "#8db8b7", fillOpacity: .10 } }).addTo(map);
+    state.markerLayer = L.layerGroup().addTo(map);
+    const bounds = state.boundaryLayer?.getBounds?.();
+    if (bounds?.isValid?.()) map.fitBounds(bounds, { padding: [26, 26] });
+    mapDebug("Bounds calculados", bounds?.isValid?.() ? boundsSummary(bounds) : null);
+    map.on("zoomend", () => renderOperationalMarkers(state));
+    if (APP_CONFIG.DEBUG_MAP === true) {
+      state.debugMarker = L.circleMarker([-28.8, -57.7], { radius: 8, color: "#d06b3c", weight: 2, fillColor: "#f0a25a", fillOpacity: .95 }).addTo(map);
+      state.debugMarker.bindTooltip("Marcador de diagnóstico", { direction: "top" });
+      mapDebug("Marcador fijo de diagnóstico agregado: true");
+    }
+    const invalidate = () => {
+      if (!state.map) return;
+      state.map.invalidateSize({ pan: false });
+      reportMapVisualState(state, "Después de invalidateSize");
+    };
+    requestAnimationFrame(() => requestAnimationFrame(invalidate));
+    setTimeout(invalidate, 100);
+    window.addEventListener("resize", invalidate, { passive: true });
+    map.whenReady(() => { invalidate(); mapDebug("Mapa Leaflet inicializado: true"); });
+    reportMapVisualState(state, "Después de init");
+    return map;
+  }
+
+  function boundsSummary(bounds) {
+    if (!bounds?.isValid?.()) return null;
+    const southWest = bounds.getSouthWest();
+    const northEast = bounds.getNorthEast();
+    return { south: Number(southWest.lat.toFixed(4)), west: Number(southWest.lng.toFixed(4)), north: Number(northEast.lat.toFixed(4)), east: Number(northEast.lng.toFixed(4)) };
+  }
+
+  function reportMapVisualState(state, stage) {
+    const container = state.container;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    mapDebug(stage, {
+      selector: "#producerMap",
+      containerFound: true,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      children: container.children.length,
+      mapInstance: Boolean(state.map),
+      tileLayer: Boolean(state.tileLayer),
+      markers: state.markerLayer?.getLayers?.().length || 0,
+      visibleProducers: state.visible?.length || 0,
+    });
   }
 
   function initPublicTerritory(data) {
@@ -647,6 +723,7 @@
       marker.on("click", () => selectOperationalProducer(item, state));
       state.markerLayer.addLayer(marker);
     });
+    reportMapVisualState(state, "Después de agregar productores");
   }
 
   function makeOperationalClusters(rows, zoom) {
@@ -685,7 +762,7 @@
     }
     detail.hidden = true; list.hidden = false; close.hidden = true;
     setText("#focusEyebrow", "RANKING OPERATIVO"); setText("#focusTitle", "Unidades destacadas"); setText("#focusFootnote", "Seleccione un productor en el mapa para consultar su ficha operativa.");
-    list.innerHTML = rows.length ? [...rows].sort((a, b) => b.totalExistencias - a.totalExistencias).slice(0, 7).map((item, index) => `<button class="focus-row operational-focus-row" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="focus-rank">${String(index + 1).padStart(2, "0")}</span><span><strong>${escapeHtml(item.displayId)}</strong><small>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><b>${formatNumber.format(item.totalExistencias)}<em>cabezas</em></b></button>`).join("") : "<p class=\"empty-panel-message\">No hay productores georreferenciados para los filtros seleccionados.</p>";
+    list.innerHTML = rows.length ? [...rows].sort((a, b) => b.totalExistencias - a.totalExistencias).slice(0, 7).map((item, index) => `<button class="ranking-item operational-focus-row" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(item.totalExistencias)}</b><em class="ranking-unit">cabezas</em></span></button>`).join("") : "<p class=\"empty-panel-message\">No hay productores visibles para los filtros seleccionados.</p>";
     list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = rows.find((row) => row.id === button.dataset.producerId); if (item) selectOperationalProducer(item, state); }));
   }
 
