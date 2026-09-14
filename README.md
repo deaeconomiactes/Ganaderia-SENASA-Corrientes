@@ -2,6 +2,8 @@
 
 Dashboard web institucional para explorar existencias ganaderas de Corrientes con filtros territoriales, estadísticas descriptivas y escenarios económicos editables. La vista pública es agregada; existe además una vista interna operativa preparada para registros georreferenciados.
 
+La implementación operativa utiliza Leaflet 1.9.4 desde `dist/vendor/leaflet/`; no depende de un CDN externo para cargar la biblioteca del mapa. La cartografía base sigue siendo OpenStreetMap y requiere conectividad para descargar teselas.
+
 ## Fuente y alcance
 
 - Fuente declarada: `Existencia Corrientes 7-9.xlsx`.
@@ -45,6 +47,8 @@ INTERNAL_PRODUCER_DATA_URL: "./data/interno/productores.json"
 
 La fuente debe permanecer fuera de GitHub Pages y del repositorio, idealmente detrás de autenticación o en una red privada. `INTERNAL_MODE` es una bandera de interfaz, no un mecanismo de seguridad. Para volver a la publicación segura usar `INTERNAL_MODE: false`, `PUBLIC_SAFE_MODE: true`, `SHOW_PRODUCER_POINTS: false` y `ENABLE_PRODUCER_DETAIL: false`. Las coordenadas co-localizadas deben validarse y agruparse antes de uso operativo; no se afirma que sean precisión predial sin metadata de origen.
 
+Si la fuente interna no está configurada, el mapa muestra la base cartográfica de Corrientes con el aviso “Modo interno preparado” y explica que debe configurarse `INTERNAL_PRODUCER_DATA_URL`. Si Leaflet falla, el contenedor muestra “No se pudo cargar el mapa” en lugar de quedar blanco. Para diagnóstico temporal puede activarse `DEBUG_MAP: true`; los logs sólo informan estado, conteos y cantidad de coordenadas válidas, nunca identificadores.
+
 El contrato de normalización acepta un array o `{ "records": [...] }` y detecta aliases como `UP_RENSPA`, `LATITUD`, `LONGITUD`, `DEPTO`, `MUNI`, `OFICINA LOCAL`, totales por especie y categorías ganaderas. El identificador se muestra enmascarado; nunca se renderiza titularidad, DNI, CUIT/CUIL, contacto o dirección.
 
 ## Ejecución local
@@ -82,5 +86,6 @@ Conservador, Base y Alto son simulaciones con supuestos ingresados por el usuari
 `dist/config.js` · rutas, provincia, umbral y endpoint seguro<br>
 `dist/data/` · metadata y base agregada pública<br>
 `dist/data/geo/` · lugar reservado para GeoJSON oficial opcional<br>
+`dist/vendor/leaflet/` · Leaflet local y recursos con licencia BSD-2-Clause<br>
 `dist/assets/`, `dist/css/`, `dist/js/` · reservados para extensiones del artefacto estático<br>
 `CONTROL_DE_CALIDAD.md` · checklist de publicación

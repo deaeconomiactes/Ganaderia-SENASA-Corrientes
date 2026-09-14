@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="./filter-upgrade.css" />
     <link rel="stylesheet" href="./bi-upgrade.css?v=20260911" />
     <link rel="stylesheet" href="./operational-map.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="./vendor/leaflet/leaflet.css" />
   </head>
   <body data-shell="admin" data-page="dashboard" data-view="territorio">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -124,7 +124,7 @@
     <dialog id="infoDialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">NOTA METODOLÓGICA</p><h2>Datos territoriales para gestión</h2><p id="sourceInfo">—</p><p>Esta vista no incluye datos personales, contactos, identificadores ni ubicación exacta de predios. Los indicadores económicos se encuentran en la vista de Análisis y requieren supuestos explícitos.</p></dialog>
     <dialog id="locatorDialog" class="renspa-dialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">LOCALIZADOR PROTEGIDO</p><h2 id="locatorDialogTitle">Consulta protegida</h2><p id="locatorStatus">La búsqueda por identificador requiere un servicio seguro autenticado. Esta versión pública sólo permite análisis agregado.</p><div id="locatorResult" class="locator-result" aria-live="polite"></div><p class="dialog-note">No se muestran ni almacenan identificadores, productores, domicilios, coordenadas exactas o existencias individuales.</p></dialog>
     <script src="./config.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="./vendor/leaflet/leaflet.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

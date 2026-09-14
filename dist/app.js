@@ -19,6 +19,7 @@
   const APP_CONFIG = window.APP_CONFIG || {};
   const SECURE_LOCATOR_ENDPOINT = window.APP_CONFIG?.SECURE_LOCATOR_ENDPOINT || null;
   let internalProducerLookup = [];
+  const mapDebug = (...args) => { if (APP_CONFIG.DEBUG_MAP === true) console.info("[SENASA mapa]", ...args); };
   setupNavigation();
   loadData();
 
@@ -253,10 +254,15 @@
 
   async function initTerritory(data) {
     if (isInternalOperationalMode()) {
+      mapDebug("Modo interno activo; iniciando fuente individual.");
       const source = await loadInternalProducerSource();
-      initOperationalTerritory(data, source);
+      try { initOperationalTerritory(data, source); } catch (_error) {
+        mapDebug("Error controlado durante la inicialización del mapa operativo.");
+        showOperationalEmpty("Leaflet no está disponible o falló la inicialización.");
+      }
       return;
     }
+    mapDebug("Modo público seguro activo; se conserva la capa agregada.");
     initPublicTerritory(data);
   }
 
@@ -266,16 +272,21 @@
 
   async function loadInternalProducerSource() {
     const url = APP_CONFIG.INTERNAL_PRODUCER_DATA_URL;
-    if (!url) return { records: [], message: "La base actual no contiene productores georreferenciados individualmente. Configure una fuente interna autorizada para habilitar los puntos." };
+    if (!url) {
+      mapDebug("No hay INTERNAL_PRODUCER_DATA_URL configurado.");
+      return { records: [], message: "La base individual de productores no está disponible en esta publicación. Configure INTERNAL_PRODUCER_DATA_URL para visualizar puntos operativos." };
+    }
     try {
       const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const normalized = normalizeProducerData(await response.json());
       internalProducerLookup = normalized;
       const mapped = normalized.filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon) && item.lat >= -90 && item.lat <= 90 && item.lon >= -180 && item.lon <= 180);
+      mapDebug("Productores cargados:", normalized.length, "con coordenadas válidas:", mapped.length);
       return { records: mapped, allRecords: normalized, message: mapped.length ? "Base interna cargada para uso operativo." : "La base interna fue leída, pero no contiene latitud y longitud válidas por productor." };
     } catch (_error) {
       internalProducerLookup = [];
+      mapDebug("No se pudo cargar la fuente interna.");
       return { records: [], message: "No se pudo cargar la fuente interna. Verifique la ruta local, permisos y formato del archivo." };
     }
   }
@@ -329,7 +340,12 @@
 
   function initOperationalTerritory(data, source) {
     document.body.classList.add("operational-active");
-    $("#territoryMap").hidden = true; $("#producerMap").hidden = false; $("#mapLegend").hidden = true; $("#selectionInsight").hidden = true;
+    const producerMap = $("#producerMap");
+    if (!producerMap) { mapDebug("Contenedor #producerMap no encontrado."); throw new Error("Contenedor de mapa operativo ausente."); }
+    producerMap.hidden = false;
+    if (producerMap.offsetHeight < 1) producerMap.style.minHeight = "620px";
+    mapDebug("Contenedor #producerMap encontrado; alto:", producerMap.offsetHeight || "pendiente");
+    $("#territoryMap").hidden = true; $("#mapLegend").hidden = true; $("#selectionInsight").hidden = true;
     $("#mapLevelControl").hidden = true; $("#producerCategoryControl").hidden = false; $("#producerRangeControl").hidden = false;
     setText("#metricRecordsLabel", "UNIDADES PRODUCTIVAS"); setText("#metricMapUnitLabel", "PRODUCTORES GEOREFERENCIADOS"); setText("#metricMapUnitNote", "Uso interno · según filtros");
     setText("#mapLayerContext", "Puntos operativos sobre mapa base · uso interno autorizado");
@@ -346,13 +362,18 @@
     $("#producerMinStock")?.addEventListener("input", (event) => { state.minStock = positiveNumber(event.target.value); state.selected = null; renderOperationalTerritory(data, state); });
     $("#resetMapViewButton")?.addEventListener("click", () => { state.selected = null; const bounds = state.boundaryLayer?.getBounds?.(); if (bounds?.isValid?.()) state.map.fitBounds(bounds, { padding: [26, 26] }); renderOperationalTerritory(data, state); });
     $("#closeProducerDetailButton")?.addEventListener("click", () => { state.selected = null; renderOperationalTerritory(data, state); });
-    if (!window.L) { showOperationalEmpty("No se pudo inicializar la biblioteca de mapas. Compruebe la conexión a Leaflet o disponga una copia local para uso sin conexión."); return; }
-    state.map = L.map("producerMap", { zoomControl: true, preferCanvas: true, attributionControl: true }).setView([-28.9, -57.9], 7);
+    if (!window.L) { mapDebug("Leaflet no disponible."); showOperationalEmpty("Leaflet no está disponible o falló la inicialización."); return; }
+    mapDebug("Leaflet disponible; creando instancia.");
+    state.map = L.map(producerMap, { zoomControl: true, preferCanvas: true, attributionControl: true }).setView([-28.9, -57.9], 7);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap contributors" }).addTo(state.map);
     if (data.limite_corrientes) state.boundaryLayer = L.geoJSON(data.limite_corrientes, { style: { color: "#3d7478", weight: 1.4, fillColor: "#8db8b7", fillOpacity: .10 } }).addTo(state.map);
     state.markerLayer = L.layerGroup().addTo(state.map);
     state.boundaryLayer?.getBounds?.().isValid() && state.map.fitBounds(state.boundaryLayer.getBounds(), { padding: [26, 26] });
     state.map.on("zoomend", () => renderOperationalMarkers(state));
+    const invalidate = () => state.map?.invalidateSize?.({ pan: false });
+    requestAnimationFrame(() => requestAnimationFrame(invalidate));
+    window.addEventListener("resize", invalidate, { passive: true });
+    state.map.whenReady(() => { invalidate(); mapDebug("Mapa Leaflet inicializado."); });
     if (!state.records.length) showOperationalEmpty(source.message);
     renderOperationalTerritory(data, state);
   }
@@ -562,7 +583,9 @@
 
   function showOperationalEmpty(message) {
     const empty = $("#producerMapEmpty"); if (!empty) return;
-    empty.hidden = false; empty.innerHTML = `<div><h3>Mapa operativo preparado</h3><p>${escapeHtml(message || "La fuente interna no contiene productores georreferenciados.")}</p></div>`;
+    const text = message || "La base individual de productores no está disponible en esta publicación. Configure INTERNAL_PRODUCER_DATA_URL para visualizar puntos operativos.";
+    const failed = /Leaflet|inicializaci[oó]n|cargar el mapa/i.test(text);
+    empty.hidden = false; empty.innerHTML = `<div><h3>${failed ? "No se pudo cargar el mapa" : "Modo interno preparado"}</h3><p>${escapeHtml(text)}</p></div>`;
   }
 
   function renderTerritory(data, state) {
