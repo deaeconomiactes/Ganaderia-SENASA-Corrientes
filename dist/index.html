@@ -15,6 +15,8 @@
     <link rel="stylesheet" href="./executive-upgrade.css" />
     <link rel="stylesheet" href="./filter-upgrade.css" />
     <link rel="stylesheet" href="./bi-upgrade.css?v=20260911" />
+    <link rel="stylesheet" href="./operational-map.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   </head>
   <body data-shell="admin" data-page="dashboard" data-view="territorio">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -81,8 +83,8 @@
       <section class="page-heading">
         <div>
           <p class="eyebrow">CORRIENTES · EXISTENCIAS GANADERAS</p>
-          <h1>Mapa territorial</h1>
-          <p class="lede">Localice concentración de existencias por zona, especie y departamento.</p>
+          <h1>Mapa operativo de productores</h1>
+          <p class="lede">Explore unidades productivas autorizadas o, en modo público, la distribución territorial agregada.</p>
         </div>
         <div class="source-chip"><span class="status-dot"></span><span id="updateText">Cargando base…</span></div>
       </section>
@@ -100,20 +102,21 @@
         <ul id="qualityChecks" class="quality-checks"></ul>
       </section>
       <section class="metric-grid" aria-label="Indicadores principales">
-        <article class="card metric-card"><span>REGISTROS PRODUCTIVOS</span><strong id="metricRecords">—</strong><small id="metricMapped">— georreferenciados · Según filtros activos</small></article>
+        <article class="card metric-card"><span id="metricRecordsLabel">REGISTROS PRODUCTIVOS</span><strong id="metricRecords">—</strong><small id="metricMapped">— georreferenciados · Según filtros activos</small></article>
         <article class="card metric-card featured"><span id="territorySpeciesLabel">BOVINOS</span><strong id="metricBovinos">—</strong><small id="metricDensity">— cabezas / registro</small></article>
         <article class="card metric-card"><span>CONCENTRACIÓN TOP 5</span><strong id="metricConcentration">—</strong><small>Datos agregados · del stock seleccionado</small></article>
-        <article class="card metric-card"><span>CELDAS TERRITORIALES ACTIVAS</span><strong id="metricGrids">—</strong><small>aprox. 13 km por celda · Sin identificación</small></article>
+        <article class="card metric-card"><span id="metricMapUnitLabel">UNIDADES TERRITORIALES ACTIVAS</span><strong id="metricGrids">—</strong><small id="metricMapUnitNote">Datos agregados · Sin identificación</small></article>
       </section>
       <section class="territory-layout">
         <article class="card panel map-panel">
-          <div class="panel-header"><div><p class="eyebrow">DISTRIBUCIÓN TERRITORIAL</p><h2>Concentración por zona</h2><p id="mapLayerContext" class="map-layer-context">Capa: municipio agregado</p></div><div class="map-controls map-controls-extended"><label>Especie<select id="speciesSelect" aria-label="Seleccionar especie"></select></label><label>Vista del mapa<select id="mapLevelSelect" aria-label="Seleccionar nivel territorial del mapa"><option value="grid">Grilla · celda 0,12°</option><option value="municipality">Municipio · celdas agrupadas</option><option value="department">Departamento · celdas agrupadas</option></select></label><label>Departamento<select id="departmentSelect" aria-label="Filtrar por departamento"></select></label><label>Municipio<select id="municipalitySelect" aria-label="Filtrar por municipio"></select></label><label>Oficina local<select id="officeSelect" aria-label="Filtrar por oficina local"></select></label></div></div>
-          <div class="map-action-bar" aria-label="Herramientas del mapa"><p id="selectionStatus" class="selection-status">Modo consulta · active la selección para delimitar un área.</p><div class="map-action-buttons"><button id="drawAreaButton" class="map-tool-button primary" type="button">Dibujar área</button><button id="finishAreaButton" class="map-tool-button" type="button" hidden>Finalizar área</button><button id="clearAreaButton" class="map-tool-button" type="button" hidden>Limpiar</button><button id="resetMapViewButton" class="map-tool-button" type="button">Restablecer vista</button></div></div>
-          <div class="map-canvas-wrap"><svg id="territoryMap" viewBox="0 0 800 620" role="img" aria-label="Mapa de Corrientes con áreas territoriales agregadas"><title>Mapa territorial agregado de Corrientes</title><desc>La intensidad del color representa existencias agregadas; no se muestran coordenadas exactas ni registros individuales.</desc><g id="mapGrid"></g><path id="provinceShape"></path><g id="selectionLayer"></g><g id="mapPoints"></g></svg><div id="mapTooltip" class="map-tooltip" hidden></div><div class="map-legend" aria-label="Escala de concentración"><span>Menor</span><span class="legend-ramp" aria-hidden="true"></span><span>Mayor</span></div></div>
+          <div class="panel-header"><div><p class="eyebrow">OPERACIÓN TERRITORIAL</p><h2>Mapa y cobertura operativa</h2><p id="mapLayerContext" class="map-layer-context">Cargando modo de visualización…</p></div><div class="map-controls map-controls-extended"><label>Especie<select id="speciesSelect" aria-label="Seleccionar especie"></select></label><label id="mapLevelControl">Vista pública<select id="mapLevelSelect" aria-label="Seleccionar nivel territorial del mapa"><option value="grid">Grilla · celda 0,12°</option><option value="municipality">Municipio · celdas agrupadas</option><option value="department">Departamento · celdas agrupadas</option></select></label><label>Departamento<select id="departmentSelect" aria-label="Filtrar por departamento"></select></label><label>Municipio<select id="municipalitySelect" aria-label="Filtrar por municipio"></select></label><label>Oficina local<select id="officeSelect" aria-label="Filtrar por oficina local"></select></label><label id="producerCategoryControl" hidden>Categoría<select id="producerCategorySelect" aria-label="Filtrar por categoría ganadera"><option value="">Todas las categorías</option></select></label><label id="producerRangeControl" hidden>Existencias mínimas<input id="producerMinStock" type="number" min="0" inputmode="numeric" placeholder="Sin mínimo" aria-label="Existencias mínimas" /></label></div></div>
+          <div class="map-action-bar" aria-label="Herramientas del mapa"><p id="selectionStatus" class="selection-status">Preparando el mapa operativo…</p><div class="map-action-buttons"><button id="drawAreaButton" class="map-tool-button primary" type="button">Dibujar área</button><button id="finishAreaButton" class="map-tool-button" type="button" hidden>Finalizar área</button><button id="clearAreaButton" class="map-tool-button" type="button" hidden>Limpiar</button><button id="resetMapViewButton" class="map-tool-button" type="button">Restablecer vista</button></div></div>
+          <div id="territoryFilterChips" class="operational-filter-chips" aria-live="polite"></div>
+          <div class="map-canvas-wrap"><div id="producerMap" class="producer-map" hidden aria-label="Mapa operativo de productores"></div><div id="producerMapEmpty" class="producer-map-empty" hidden role="status"></div><svg id="territoryMap" viewBox="0 0 800 620" role="img" aria-label="Mapa de Corrientes con áreas territoriales agregadas"><title>Mapa territorial agregado de Corrientes</title><desc>La intensidad del color representa existencias agregadas; no se muestran coordenadas exactas ni registros individuales.</desc><g id="mapGrid"></g><path id="provinceShape"></path><g id="selectionLayer"></g><g id="mapPoints"></g></svg><div id="mapTooltip" class="map-tooltip" hidden></div><div id="mapLegend" class="map-legend" aria-label="Escala de concentración"><span>Menor</span><span class="legend-ramp" aria-hidden="true"></span><span>Mayor</span></div></div>
           <section id="selectionInsight" class="selection-insight" aria-live="polite"><div><p class="eyebrow">ÁREA DE CONSULTA</p><h3>Delimite un polígono sobre el mapa</h3><p>Los resultados se calculan sobre grillas territoriales agregadas, no sobre ubicaciones exactas de establecimientos.</p></div></section>
-          <footer class="map-footer"><span>Grillas de aprox. 0,12°; se excluyen coordenadas exactas para preservar confidencialidad.</span><span id="selectedSummary">—</span></footer>
+          <footer class="map-footer"><span id="mapFooterNotice">Grillas de aprox. 0,12°; se excluyen coordenadas exactas para preservar confidencialidad.</span><span id="selectedSummary">—</span></footer>
         </article>
-        <aside class="card panel focus-panel"><div class="panel-header"><div><p class="eyebrow">FOCOS PRIORITARIOS</p><h2>Zonas a observar</h2></div></div><div id="focusList" class="focus-list" aria-live="polite"></div><div class="panel-footnote">Ordenado por existencias de la especie seleccionada.</div></aside>
+        <aside class="card panel focus-panel"><div class="panel-header"><div><p id="focusEyebrow" class="eyebrow">FOCOS PRIORITARIOS</p><h2 id="focusTitle">Zonas a observar</h2></div><button id="closeProducerDetailButton" class="map-tool-button" type="button" hidden>Volver al resumen</button></div><div id="internalModeNotice" class="internal-mode-notice" hidden></div><div id="focusList" class="focus-list" aria-live="polite"></div><div id="producerDetail" class="producer-detail" aria-live="polite" hidden></div><div id="focusFootnote" class="panel-footnote">Ordenado por existencias de la especie seleccionada.</div></aside>
       </section>
       <section class="card panel table-panel"><div class="panel-header"><div><p class="eyebrow">DETALLE OPERATIVO</p><h2>Municipios y oficinas locales</h2></div><div class="table-summary" id="tableSummary">—</div></div><div class="table-scroll"><table><thead><tr><th>Municipio</th><th>Departamento</th><th>Oficina local</th><th>Registros</th><th class="numeric">Bovinos</th><th class="numeric">Bubalinos</th><th class="numeric">Ovinos</th></tr></thead><tbody id="municipalityRows"></tbody></table></div></section>
     </main>
@@ -121,6 +124,7 @@
     <dialog id="infoDialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">NOTA METODOLÓGICA</p><h2>Datos territoriales para gestión</h2><p id="sourceInfo">—</p><p>Esta vista no incluye datos personales, contactos, identificadores ni ubicación exacta de predios. Los indicadores económicos se encuentran en la vista de Análisis y requieren supuestos explícitos.</p></dialog>
     <dialog id="locatorDialog" class="renspa-dialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">LOCALIZADOR PROTEGIDO</p><h2 id="locatorDialogTitle">Consulta protegida</h2><p id="locatorStatus">La búsqueda por identificador requiere un servicio seguro autenticado. Esta versión pública sólo permite análisis agregado.</p><div id="locatorResult" class="locator-result" aria-live="polite"></div><p class="dialog-note">No se muestran ni almacenan identificadores, productores, domicilios, coordenadas exactas o existencias individuales.</p></dialog>
     <script src="./config.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="./app.js"></script>
   </body>
 </html>

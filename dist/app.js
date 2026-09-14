@@ -18,6 +18,7 @@
 
   const APP_CONFIG = window.APP_CONFIG || {};
   const SECURE_LOCATOR_ENDPOINT = window.APP_CONFIG?.SECURE_LOCATOR_ENDPOINT || null;
+  let internalProducerLookup = [];
   setupNavigation();
   loadData();
 
@@ -35,7 +36,7 @@
         } catch (_metadataError) { /* Se conserva la metadata incluida en la base agregada. */ }
       }
       data.metadata = metadata;
-      init(data);
+      await init(data);
     } catch (error) {
       showDataError(dataUrl, error);
     }
@@ -67,11 +68,11 @@
     setOpen(false);
   }
 
-  function init(data) {
+  async function init(data) {
     try {
       setupCommon(data);
       setupProtectedLocator();
-      if (document.body.dataset.view === "territorio") initTerritory(data);
+      if (document.body.dataset.view === "territorio") await initTerritory(data);
       if (document.body.dataset.view === "analisis") initAnalysis(data);
     } catch (error) {
       showDataError(APP_CONFIG.DATA_URL || "./data/senasa-corrientes.json", error);
@@ -124,7 +125,13 @@
   }
 
   async function fetchLocator(identifierType, identifier) {
+    if (APP_CONFIG.ENABLE_SECURE_LOCATOR === false) return { found: false, message: "El localizador está deshabilitado en esta configuración." };
     const endpoint = SECURE_LOCATOR_ENDPOINT;
+    if (!endpoint && isInternalOperationalMode() && internalProducerLookup.length) {
+      const normalized = normalizeIdentifier(identifier);
+      const match = internalProducerLookup.find((item) => item.searchTokens.includes(normalized));
+      return match ? { found: true, area: { departamento: match.departamento, municipio: match.municipio, oficinaLocal: match.oficinaLocal, gridId: "Zona operativa interna" }, message: "Coincidencia encontrada en zona agregada. No se muestran datos individuales." } : { found: false, message: "No se encontró coincidencia o no cuenta con permisos para consultar este identificador." };
+    }
     if (!endpoint) return { found: false, message: "La búsqueda por identificador requiere un servicio seguro autenticado. Esta versión pública sólo permite análisis agregado." };
     const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifierType, identifier }) });
     if (!response.ok) throw new Error("Servicio protegido no disponible.");
@@ -244,7 +251,113 @@
     setText("#tracePrivacy", "Datos agregados. No se muestran datos personales, coordenadas exactas ni información individual de productores.");
   }
 
-  function initTerritory(data) {
+  async function initTerritory(data) {
+    if (isInternalOperationalMode()) {
+      const source = await loadInternalProducerSource();
+      initOperationalTerritory(data, source);
+      return;
+    }
+    initPublicTerritory(data);
+  }
+
+  function isInternalOperationalMode() {
+    return APP_CONFIG.INTERNAL_MODE === true && APP_CONFIG.PUBLIC_SAFE_MODE !== true && APP_CONFIG.SHOW_PRODUCER_POINTS === true;
+  }
+
+  async function loadInternalProducerSource() {
+    const url = APP_CONFIG.INTERNAL_PRODUCER_DATA_URL;
+    if (!url) return { records: [], message: "La base actual no contiene productores georreferenciados individualmente. Configure una fuente interna autorizada para habilitar los puntos." };
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const normalized = normalizeProducerData(await response.json());
+      internalProducerLookup = normalized;
+      const mapped = normalized.filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon) && item.lat >= -90 && item.lat <= 90 && item.lon >= -180 && item.lon <= 180);
+      return { records: mapped, allRecords: normalized, message: mapped.length ? "Base interna cargada para uso operativo." : "La base interna fue leída, pero no contiene latitud y longitud válidas por productor." };
+    } catch (_error) {
+      internalProducerLookup = [];
+      return { records: [], message: "No se pudo cargar la fuente interna. Verifique la ruta local, permisos y formato del archivo." };
+    }
+  }
+
+  function normalizeProducerData(rawData) {
+    const rows = Array.isArray(rawData) ? rawData : (rawData?.records || rawData?.rows || rawData?.data || []);
+    if (!Array.isArray(rows)) return [];
+    const fields = detectLivestockFields(rows);
+    return rows.map((row, index) => {
+      const get = (name) => row?.[fields[name]];
+      const species = Object.fromEntries(Object.entries(fields.species).map(([key, field]) => [key, positiveNumber(row?.[field])]).filter(([, value]) => value > 0));
+      const categories = Object.fromEntries(Object.entries(fields.categories).map(([key, field]) => [key, positiveNumber(row?.[field])]).filter(([, value]) => value > 0));
+      const totalFromParts = Object.values(species).reduce((total, value) => total + value, 0) || Object.values(categories).reduce((total, value) => total + value, 0);
+      const id = safeOperationalId(get("id"), index);
+      const rawRenspa = get("renspa");
+      return {
+        id,
+        displayId: rawRenspa ? `RENSPA ${maskIdentifier(rawRenspa)}` : `Unidad ${id}`,
+        renspaMasked: rawRenspa ? maskIdentifier(rawRenspa) : "",
+        lat: parseCoordinate(get("lat")), lon: parseCoordinate(get("lon")),
+        departamento: safeText(get("departamento")), municipio: safeText(get("municipio")), oficinaLocal: safeText(get("oficina")),
+        totalExistencias: positiveNumber(get("total")) || totalFromParts,
+        especies: species, categorias: categories, rawSafe: {},
+        searchTokens: [get("id"), rawRenspa, get("internalId")].filter(Boolean).map(normalizeIdentifier),
+      };
+    });
+  }
+
+  function detectLivestockFields(rows) {
+    const keys = [...new Set(rows.slice(0, 30).flatMap((row) => Object.keys(row || {})))];
+    const find = (aliases) => keys.find((key) => aliases.includes(canonicalKey(key)));
+    const speciesAliases = { bovinos: ["bovinos", "bovino", "bov"], bubalinos: ["bubalinos", "bubalino", "bufalos", "bufalo"], ovinos: ["ovinos", "ovino", "ovejas"], caprinos: ["caprinos", "caprino", "cabras"], porcinos: ["porcinos", "porcino", "cerdos"], equinos: ["equinos", "equino", "caballos"] };
+    const categoryAliases = { vacas: ["vacas", "vaca"], vaquillonas: ["vaquillonas", "vaquillona"], novillos: ["novillos", "novillo"], novillitos: ["novillitos", "novillito"], terneros: ["terneros", "ternero"], terneras: ["terneras", "ternera"], toros: ["toros", "toro"], bueyes: ["bueyes", "buey"], bufalas: ["bufalas", "bufala"] };
+    return {
+      id: find(["idproductor", "productorid", "idunidad", "unidadid", "idregistro", "registroid", "codigooperativo", "codigo", "id"]),
+      internalId: find(["idinterno", "internoid", "codigooperativo"]), renspa: find(["renspa", "renspanro", "renspanumero", "uprenspa"]),
+      lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]),
+      departamento: find(["departamento", "depto", "depto" ]), municipio: find(["municipio", "muni", "localidad", "paraje"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]),
+      total: find(["totalexistencias", "existenciastotales", "totalanimales", "totalcabezas", "existencias"]),
+      species: Object.fromEntries(Object.entries(speciesAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field)),
+      categories: Object.fromEntries(Object.entries(categoryAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field)),
+    };
+  }
+
+  function canonicalKey(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+  function positiveNumber(value) { const number = typeof value === "number" ? value : Number(String(value ?? "").trim().replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", ".")); return Number.isFinite(number) && number > 0 ? number : 0; }
+  function parseCoordinate(value) { const number = Number(String(value ?? "").trim().replace(",", ".")); return Number.isFinite(number) && Math.abs(number) > 0.01 && Math.abs(number) <= 180 ? number : NaN; }
+  function safeText(value) { return String(value || "").trim().slice(0, 120); }
+  function safeOperationalId(value, index) { const id = safeText(value).replace(/[^A-Za-z0-9._-]/g, "").slice(0, 32); return id || `OP-${String(index + 1).padStart(5, "0")}`; }
+  function maskIdentifier(value) { const text = normalizeIdentifier(value); return text.length > 4 ? `${text.slice(0, 2)}••••${text.slice(-2)}` : "••••"; }
+
+  function initOperationalTerritory(data, source) {
+    document.body.classList.add("operational-active");
+    $("#territoryMap").hidden = true; $("#producerMap").hidden = false; $("#mapLegend").hidden = true; $("#selectionInsight").hidden = true;
+    $("#mapLevelControl").hidden = true; $("#producerCategoryControl").hidden = false; $("#producerRangeControl").hidden = false;
+    setText("#metricRecordsLabel", "UNIDADES PRODUCTIVAS"); setText("#metricMapUnitLabel", "PRODUCTORES GEOREFERENCIADOS"); setText("#metricMapUnitNote", "Uso interno · según filtros");
+    setText("#mapLayerContext", "Puntos operativos sobre mapa base · uso interno autorizado");
+    setText("#mapFooterNotice", "Puntos operativos con coordenadas de la fuente interna; validar precisión y no publicar.");
+    setText("#traceGrain", "Unidad productiva · punto georreferenciado"); setText("#tracePrivacy", "Modo interno autorizado. No publicar identificadores, contactos ni coordenadas sin control de acceso.");
+    document.querySelector(".senasa-nav-note")?.replaceChildren(Object.assign(document.createElement("span"), { className: "status-dot" }), document.createTextNode("Modo interno operativo"));
+    const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = "<strong>Modo interno operativo</strong> · Esta vista contiene información desagregada para uso interno. No publicar sin autenticación ni control de acceso.";
+    const state = { data, filters: readGlobalFilters(), category: "", minStock: 0, selected: null, records: source.records || [], map: null, markerLayer: null, boundaryLayer: null };
+    const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
+    syncLocationControls(data, state.filters, controls);
+    bindLocationControls(data, state.filters, controls, () => { state.selected = null; renderOperationalTerritory(data, state); });
+    populateOperationalCategories(state.records);
+    $("#producerCategorySelect")?.addEventListener("change", (event) => { state.category = event.target.value; state.selected = null; renderOperationalTerritory(data, state); });
+    $("#producerMinStock")?.addEventListener("input", (event) => { state.minStock = positiveNumber(event.target.value); state.selected = null; renderOperationalTerritory(data, state); });
+    $("#resetMapViewButton")?.addEventListener("click", () => { state.selected = null; const bounds = state.boundaryLayer?.getBounds?.(); if (bounds?.isValid?.()) state.map.fitBounds(bounds, { padding: [26, 26] }); renderOperationalTerritory(data, state); });
+    $("#closeProducerDetailButton")?.addEventListener("click", () => { state.selected = null; renderOperationalTerritory(data, state); });
+    if (!window.L) { showOperationalEmpty("No se pudo inicializar la biblioteca de mapas. Compruebe la conexión a Leaflet o disponga una copia local para uso sin conexión."); return; }
+    state.map = L.map("producerMap", { zoomControl: true, preferCanvas: true, attributionControl: true }).setView([-28.9, -57.9], 7);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap contributors" }).addTo(state.map);
+    if (data.limite_corrientes) state.boundaryLayer = L.geoJSON(data.limite_corrientes, { style: { color: "#3d7478", weight: 1.4, fillColor: "#8db8b7", fillOpacity: .10 } }).addTo(state.map);
+    state.markerLayer = L.layerGroup().addTo(state.map);
+    state.boundaryLayer?.getBounds?.().isValid() && state.map.fitBounds(state.boundaryLayer.getBounds(), { padding: [26, 26] });
+    state.map.on("zoomend", () => renderOperationalMarkers(state));
+    if (!state.records.length) showOperationalEmpty(source.message);
+    renderOperationalTerritory(data, state);
+  }
+
+  function initPublicTerritory(data) {
     const totals = data.totales;
     const speciesSelect = $("#speciesSelect");
     const deptSelect = $("#departmentSelect");
@@ -322,6 +435,132 @@
         return { especie: input.especie, departamento: requestedDepartment, municipio: state.filters.municipality || null, oficina: state.filters.office || null, grillas_visibles: state.activeGrids.length };
       },
     });
+  }
+
+  function populateOperationalCategories(records) {
+    const select = $("#producerCategorySelect");
+    if (!select) return;
+    const categories = [...new Set(records.flatMap((item) => Object.keys(item.categorias || {})))].sort();
+    select.innerHTML = `<option value="">Todas las categorías</option>${categories.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(titleCase(item))}</option>`).join("")}`;
+    $("#producerCategoryControl").hidden = !categories.length;
+  }
+
+  function operationalRows(state) {
+    const filters = state.filters;
+    return state.records.filter((item) => {
+      const speciesOk = !filters.species || filters.species === "all" || positiveNumber(item.especies?.[filters.species]) > 0;
+      const departmentOk = filters.department === "all" || !filters.department || item.departamento === filters.department;
+      const municipalityOk = !filters.municipality || item.municipio === filters.municipality;
+      const officeOk = !filters.office || item.oficinaLocal === filters.office;
+      const categoryOk = !state.category || positiveNumber(item.categorias?.[state.category]) > 0;
+      return speciesOk && departmentOk && municipalityOk && officeOk && categoryOk && item.totalExistencias >= state.minStock;
+    });
+  }
+
+  function renderOperationalTerritory(data, state) {
+    const rows = operationalRows(state);
+    if (state.selected && !rows.some((item) => item.id === state.selected.id)) state.selected = null;
+    state.visible = rows;
+    renderOperationalMarkers(state);
+    renderOperationalMetrics(rows, state);
+    renderOperationalPanel(rows, state);
+    renderOperationalFilterChips(state, rows.length);
+    setText("#selectionStatus", state.selected ? `Unidad seleccionada · ${state.selected.displayId}` : `${formatNumber.format(rows.length)} productores georreferenciados visibles · seleccione un punto para ver el detalle.`);
+    setText("#selectedSummary", `${formatNumber.format(rows.length)} puntos visibles`);
+    setText("#tableSummary", state.records.length ? "La tabla pública conserva el resumen agregado." : "Sin fuente individual georreferenciada.");
+    const sourceData = data || state.data || {};
+    renderQualitySummary(sourceData, state.filters, filterRows(sourceData.municipios || [], state.filters));
+  }
+
+  function renderOperationalMetrics(rows, state) {
+    const species = state.filters.species && state.filters.species !== "all" ? state.filters.species : "bovinos";
+    const total = rows.reduce((sumValue, item) => sumValue + item.totalExistencias, 0);
+    const selectedSpecies = rows.reduce((sumValue, item) => sumValue + positiveNumber(item.especies?.[species]), 0);
+    const top = [...rows].sort((a, b) => b.totalExistencias - a.totalExistencias).slice(0, 5).reduce((sumValue, item) => sumValue + item.totalExistencias, 0);
+    setText("#metricRecords", formatNumber.format(rows.length));
+    setText("#metricBovinos", formatNumber.format(selectedSpecies || total));
+    setText("#territorySpeciesLabel", selectedSpecies ? speciesLabel(species).toUpperCase() : "EXISTENCIAS TOTALES");
+    setText("#metricDensity", rows.length ? `${(total / rows.length).toLocaleString("es-AR", { maximumFractionDigits: 1 })} cabezas / unidad` : "Sin unidades visibles");
+    setText("#metricConcentration", total ? `${Math.round((top / total) * 100)}%` : "—");
+    setText("#metricGrids", formatNumber.format(rows.length));
+    setText("#metricMapped", `${formatNumber.format(rows.length)} georreferenciados · Según filtros activos`);
+  }
+
+  function renderOperationalMarkers(state) {
+    if (!state.markerLayer || !state.map) return;
+    state.markerLayer.clearLayers();
+    const rows = state.visible || [];
+    const limit = Number(APP_CONFIG.INTERNAL_MAX_MARKERS || 800);
+    const shouldCluster = rows.length > limit;
+    const groups = shouldCluster ? makeOperationalClusters(rows, state.map.getZoom()) : rows.map((item) => ({ items: [item], lat: item.lat, lon: item.lon }));
+    groups.forEach((group) => {
+      if (group.items.length > 1) {
+        const marker = L.marker([group.lat, group.lon], { icon: L.divIcon({ className: "", html: `<span class="producer-cluster">${formatNumber.format(group.items.length)}</span>`, iconSize: [38, 38], iconAnchor: [19, 19] }) });
+        marker.bindTooltip(`${formatNumber.format(group.items.length)} productores agrupados`, { direction: "top" });
+        marker.on("click", () => { const bounds = L.latLngBounds(group.items.map((item) => [item.lat, item.lon])); state.map.fitBounds(bounds, { padding: [32, 32], maxZoom: 12 }); });
+        state.markerLayer.addLayer(marker);
+        return;
+      }
+      const item = group.items[0]; const selected = state.selected?.id === item.id; const radius = markerRadius(item.totalExistencias, rows);
+      const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "", html: `<span class="producer-marker${selected ? " is-selected" : ""}" style="width:${radius}px;height:${radius}px"></span>`, iconSize: [radius, radius], iconAnchor: [radius / 2, radius / 2] }) });
+      marker.bindTooltip(producerTooltip(item), { direction: "top", opacity: .96 });
+      marker.on("click", () => selectOperationalProducer(item, state));
+      state.markerLayer.addLayer(marker);
+    });
+  }
+
+  function makeOperationalClusters(rows, zoom) {
+    const step = zoom < 8 ? .45 : zoom < 10 ? .16 : .06;
+    const groups = new Map();
+    rows.forEach((item) => { const key = `${Math.round(item.lat / step)}:${Math.round(item.lon / step)}`; const group = groups.get(key) || { items: [] }; group.items.push(item); groups.set(key, group); });
+    return [...groups.values()].map((group) => ({ ...group, lat: group.items.reduce((sumValue, item) => sumValue + item.lat, 0) / group.items.length, lon: group.items.reduce((sumValue, item) => sumValue + item.lon, 0) / group.items.length }));
+  }
+
+  function markerRadius(value, rows) { const max = Math.max(...rows.map((item) => item.totalExistencias), 1); return Math.round(10 + Math.min(12, Math.sqrt(Math.max(0, value) / max) * 12)); }
+  function producerTooltip(item) { return `<div class="producer-popup"><strong>${escapeHtml(item.displayId)}</strong><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(item.totalExistencias)}</b> existencias · ${escapeHtml(titleCase(dominantProducerSpecies(item)))}</span></div>`; }
+  function dominantProducerSpecies(item) { return Object.entries(item.especies || {}).sort((a, b) => b[1] - a[1])[0]?.[0] || "sin especie informada"; }
+
+  function selectOperationalProducer(item, state) {
+    state.selected = item;
+    state.map?.setView([item.lat, item.lon], Math.max(state.map.getZoom(), 12), { animate: true });
+    renderOperationalTerritory(state.data, state);
+  }
+
+  function renderOperationalPanel(rows, state) {
+    const list = $("#focusList"), detail = $("#producerDetail"), close = $("#closeProducerDetailButton");
+    if (state.selected && APP_CONFIG.ENABLE_PRODUCER_DETAIL !== false) {
+      list.hidden = true; detail.hidden = false; close.hidden = false;
+      detail.innerHTML = producerDetailMarkup(state.selected);
+      setText("#focusEyebrow", "FICHA OPERATIVA"); setText("#focusTitle", "Detalle de unidad"); setText("#focusFootnote", "Información interna desagregada. No compartir ni publicar sin autorización.");
+      return;
+    }
+    if (state.selected) {
+      list.hidden = false; detail.hidden = true; close.hidden = true;
+      list.innerHTML = "<p class=\"empty-panel-message\">El detalle individual está deshabilitado en esta configuración.</p>";
+      return;
+    }
+    detail.hidden = true; list.hidden = false; close.hidden = true;
+    setText("#focusEyebrow", "RANKING OPERATIVO"); setText("#focusTitle", "Unidades destacadas"); setText("#focusFootnote", "Seleccione un productor en el mapa para consultar su ficha operativa.");
+    list.innerHTML = rows.length ? [...rows].sort((a, b) => b.totalExistencias - a.totalExistencias).slice(0, 7).map((item, index) => `<button class="focus-row operational-focus-row" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="focus-rank">${String(index + 1).padStart(2, "0")}</span><span><strong>${escapeHtml(item.displayId)}</strong><small>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><b>${formatNumber.format(item.totalExistencias)}<em>cabezas</em></b></button>`).join("") : "<p class=\"empty-panel-message\">No hay productores georreferenciados para los filtros seleccionados.</p>";
+    list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = rows.find((row) => row.id === button.dataset.producerId); if (item) selectOperationalProducer(item, state); }));
+  }
+
+  function producerDetailMarkup(item) {
+    const total = item.totalExistencias || 1;
+    const bars = (collection) => Object.entries(collection || {}).sort((a, b) => b[1] - a[1]).map(([key, value]) => `<div class="producer-bar"><span>${escapeHtml(titleCase(key))}</span><i style="--share:${Math.min(100, value / total * 100)}%"></i><b>${formatNumber.format(value)}</b></div>`).join("") || "<p class=\"empty-panel-message\">No se informaron valores desagregados.</p>";
+    const categoryRows = Object.entries(item.categorias || {}).sort((a, b) => b[1] - a[1]).map(([key, value]) => `<tr><td>${escapeHtml(titleCase(key))}</td><td>${formatNumber.format(value)}</td></tr>`).join("") || "<tr><td colspan=\"2\">Sin categorías informadas.</td></tr>";
+    return `<div class="producer-detail-header"><h3>${escapeHtml(item.displayId)}</h3><p>${escapeHtml([item.departamento, item.municipio, item.oficinaLocal].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</p></div><div class="producer-kpis"><div><span>Existencias</span><strong>${formatNumber.format(item.totalExistencias)}</strong></div><div><span>Especie dominante</span><strong>${escapeHtml(titleCase(dominantProducerSpecies(item)))}</strong></div></div><section class="producer-detail-section"><h4>Existencias por especie</h4><div class="producer-bars">${bars(item.especies)}</div></section><section class="producer-detail-section"><h4>Categorías ganaderas</h4><table class="producer-detail-table"><tbody>${categoryRows}</tbody></table></section>`;
+  }
+
+  function renderOperationalFilterChips(state, count) {
+    const target = $("#territoryFilterChips"); if (!target) return;
+    const labels = [["Especie", state.filters.species && state.filters.species !== "all" ? speciesLabel(state.filters.species) : "Todas"], ["Departamento", state.filters.department !== "all" ? state.filters.department : "Toda la provincia"], ["Municipio", state.filters.municipality], ["Oficina", state.filters.office], ["Categoría", state.category], ["Mínimo", state.minStock ? `${formatNumber.format(state.minStock)} cabezas` : ""]].filter(([, value]) => value);
+    target.innerHTML = `<span class="filter-count">${formatNumber.format(count)} visibles</span>${labels.map(([label, value]) => `<span class="operational-filter-chip">${escapeHtml(label)}: ${escapeHtml(value)}</span>`).join("")}`;
+  }
+
+  function showOperationalEmpty(message) {
+    const empty = $("#producerMapEmpty"); if (!empty) return;
+    empty.hidden = false; empty.innerHTML = `<div><h3>Mapa operativo preparado</h3><p>${escapeHtml(message || "La fuente interna no contiene productores georreferenciados.")}</p></div>`;
   }
 
   function renderTerritory(data, state) {

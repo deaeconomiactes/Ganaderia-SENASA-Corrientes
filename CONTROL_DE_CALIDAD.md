@@ -19,3 +19,13 @@
 - [ ] Mapa público usa celdas agregadas y no puntos con coordenadas de establecimientos
 - [ ] El nivel seleccionado del mapa (grilla/municipio/departamento) mantiene trazabilidad de la agregación
 - [ ] No se inventaron polígonos administrativos; GeoJSON oficial pendiente documentado si se requiere coropleta real
+
+## Modo interno (antes de habilitarlo localmente)
+
+- [ ] La fuente individual se encuentra fuera de GitHub Pages y del repositorio
+- [ ] `INTERNAL_MODE` sólo está activo en una copia autenticada/local
+- [ ] Se validaron origen y precisión de latitud/longitud
+- [ ] Se excluyeron coordenadas inválidas (incluido 0,0) y se habilitó clustering
+- [ ] Se verificó que no se renderizan titularidad, documentos, contactos ni domicilio
+- [ ] Se comprobó que la ficha muestra sólo el identificador operativo enmascarado
+- [ ] La copia pública vuelve a `PUBLIC_SAFE_MODE: true` antes de cualquier push

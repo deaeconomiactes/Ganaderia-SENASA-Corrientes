@@ -1,6 +1,6 @@
 # Dashboard SENASA · Ganadería Corrientes
 
-Dashboard web institucional para explorar existencias ganaderas de Corrientes con filtros territoriales, mapa de grillas agregadas, estadísticas descriptivas y escenarios económicos editables.
+Dashboard web institucional para explorar existencias ganaderas de Corrientes con filtros territoriales, estadísticas descriptivas y escenarios económicos editables. La vista pública es agregada; existe además una vista interna operativa preparada para registros georreferenciados.
 
 ## Fuente y alcance
 
@@ -11,6 +11,8 @@ Dashboard web institucional para explorar existencias ganaderas de Corrientes co
 - Los totales/KPIs públicos se calculan sobre las unidades publicadas después de la supresión; no permiten inferir existencias suprimidas.
 - La fuente no informa fecha de corte; el tablero lo muestra como advertencia y no infiere evolución temporal.
 - La fecha de actualización del dashboard se mantiene explícita en `dist/config.js`, separada de la fecha de actualización de la fuente.
+
+La auditoría interna de `Existencia Corrientes 7-9.xlsx` identificó aproximadamente 67.457 filas de unidad/UP_RENSPA, 67.351 coordenadas plausibles, 106 coordenadas inválidas, 26 departamentos, 246 municipios y 28 oficinas locales. La fuente contiene identificadores, titularidad, documentos, contactos y coordenadas; por eso no se copia al build público ni al repositorio.
 
 ## Capas cartográficas y lectura del mapa
 
@@ -26,6 +28,24 @@ El panel **Control de calidad de datos** y sus validaciones siguen implementados
 Este dashboard está diseñado para publicar únicamente información agregada. La búsqueda por RENSPA, DNI, CUIT o CUIL no debe resolverse desde archivos públicos del frontend. Para habilitar esa función se requiere un servicio seguro, autenticado y auditado, que devuelva únicamente zonas agregadas y nunca datos personales ni productivos individuales.
 
 El repositorio y GitHub Pages no deben contener el XLSX original, RENSPA, DNI, CUIT, CUIL, hashes, nombres de productores, domicilios, coordenadas exactas ni datos individuales. El localizador público funciona en modo restringido cuando `SECURE_LOCATOR_ENDPOINT` es `null`.
+
+## Modo interno operativo
+
+El mapa operativo usa Leaflet/OpenStreetMap y puede representar unidades productivas como puntos, con clustering, filtros por especie/departamento/municipio/oficina/categoría, rango mínimo de existencias, ranking y ficha desagregada. La base actual pública no contiene esos registros: el sitio muestra un estado vacío hasta que se configure una fuente interna autorizada.
+
+Para una copia local controlada, configurar en `dist/config.js`:
+
+```js
+INTERNAL_MODE: true,
+PUBLIC_SAFE_MODE: false,
+SHOW_PRODUCER_POINTS: true,
+ENABLE_PRODUCER_DETAIL: true,
+INTERNAL_PRODUCER_DATA_URL: "./data/interno/productores.json"
+```
+
+La fuente debe permanecer fuera de GitHub Pages y del repositorio, idealmente detrás de autenticación o en una red privada. `INTERNAL_MODE` es una bandera de interfaz, no un mecanismo de seguridad. Para volver a la publicación segura usar `INTERNAL_MODE: false`, `PUBLIC_SAFE_MODE: true`, `SHOW_PRODUCER_POINTS: false` y `ENABLE_PRODUCER_DETAIL: false`. Las coordenadas co-localizadas deben validarse y agruparse antes de uso operativo; no se afirma que sean precisión predial sin metadata de origen.
+
+El contrato de normalización acepta un array o `{ "records": [...] }` y detecta aliases como `UP_RENSPA`, `LATITUD`, `LONGITUD`, `DEPTO`, `MUNI`, `OFICINA LOCAL`, totales por especie y categorías ganaderas. El identificador se muestra enmascarado; nunca se renderiza titularidad, DNI, CUIT/CUIL, contacto o dirección.
 
 ## Ejecución local
 

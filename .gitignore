@@ -51,3 +51,5 @@ node_modules/
 .wrangler/
 dist/**/*.map
 dist/.openai/
+/dist/data/interno/*
+!/dist/data/interno/README.md
