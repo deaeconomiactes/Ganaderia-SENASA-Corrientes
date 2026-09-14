@@ -6,7 +6,7 @@ La implementación operativa utiliza Leaflet 1.9.4 desde `dist/vendor/leaflet/`;
 
 ## Dos configuraciones de despliegue
 
-El repositorio mantiene dos plantillas separadas. GitHub Pages siempre genera `dist/config.js` desde `config.public.js` mediante `node scripts/build-config.mjs public`; el usuario final no necesita editar código. La versión interna se genera sólo en un entorno protegido con `node scripts/build-config.mjs internal` y debe recibir allí la fuente individual autorizada.
+El repositorio mantiene dos plantillas separadas. GitHub Pages siempre genera `dist/config.js` desde `config.public.js` mediante `node scripts/build-config.mjs public`; el usuario final no necesita editar código. La versión interna se prepara como un artefacto aislado con `node scripts/build-internal-dist.mjs` y se publica sólo en un entorno protegido.
 
 | Artefacto | Configuración | Datos | Destino |
 | --- | --- | --- | --- |
@@ -46,7 +46,7 @@ El repositorio y GitHub Pages no deben contener el XLSX original, RENSPA, DNI, C
 
 El mapa operativo usa Leaflet/OpenStreetMap y representa unidades productivas como puntos, con clusters inspectables, filtros primarios por especie ganadera/departamento/municipio/oficina y un bloque avanzado (categoría, existencias mínimas e inclusión de ceros). Todos los flujos llaman a `selectProducer()`; la capa `selectedProducerLayer` queda por encima de clusters y puntos normales, centra el mapa, abre el popup y actualiza la ficha. El ranking, el localizador interno y los puntos del mapa comparten la misma selección: al seleccionar una fila se centra el mapa, se resalta el marcador y se abre la ficha desagregada. La base pública no contiene esos registros; el artefacto interno se configura una sola vez por el administrador y el jefe sólo recibe el enlace protegido.
 
-Para probar una copia local controlada, el administrador ejecuta `node scripts/build-config.mjs internal`, coloca la fuente protegida en `dist/data/interno/productores.json` o configura un endpoint seguro, y sirve `dist/`. Esto no debe hacerse sobre el artefacto que se subirá a GitHub Pages. Las coordenadas co-localizadas deben validarse y agruparse antes de uso operativo; no se afirma que sean precisión predial sin metadata de origen.
+Para probar una copia local controlada, el administrador ejecuta `node scripts/build-producer-data.mjs` y luego `node scripts/build-internal-dist.mjs`, y sirve `internal-dist/`. Esto no debe hacerse sobre el artefacto que se subirá a GitHub Pages. Las coordenadas co-localizadas deben validarse y agruparse antes de uso operativo; no se afirma que sean precisión predial sin metadata de origen.
 
 Si la fuente interna no está configurada, el mapa muestra la base cartográfica de Corrientes con el aviso “Modo interno preparado” y el mensaje “No se encontró la fuente interna de productores. Contacte al administrador del dashboard.” Si Leaflet falla, el contenedor muestra “No se pudo cargar el mapa” en lugar de quedar blanco. Para diagnóstico temporal puede activarse `DEBUG_MAP: true`; los logs sólo informan estado, conteos y cantidad de coordenadas válidas, nunca identificadores. En modo interno no se muestra el selector “Vista pública”: la vista prioriza especie ganadera y ubicación administrativa, mientras que “Filtros avanzados” permanece cerrado hasta que se necesite.
 
@@ -95,10 +95,10 @@ Todas las rutas del sitio son relativas (`./data`, `./config.js`, `./app.js`), p
 
 ## Despliegue interno protegido
 
-1. Crear un proyecto privado en Vercel, Netlify, un servidor institucional o una intranet con autenticación/RBAC.
-2. Construir en ese entorno con `node scripts/build-config.mjs internal`. Si la fuente es una API, el administrador puede pasarla sin editar el frontend: `node scripts/build-config.mjs internal --data-url https://dominio-interno/api/productores --locator-endpoint https://dominio-interno/api/secure-locator`.
-3. Si la fuente es un archivo, inyectar `dist/data/interno/productores.json` desde almacenamiento privado; si es remota, usar `INTERNAL_PRODUCER_DATA_URL` hacia una API autenticada.
-4. Publicar sólo detrás del control de acceso institucional y verificar que el artefacto no quede indexado ni accesible sin login.
+1. Generar `productores.json` y `reporte_productores.json` en una máquina administrativa con `node scripts/build-producer-data.mjs "./data/interno/base_original.xlsx"`.
+2. Ejecutar `node scripts/build-internal-dist.mjs` (o `npm run build:internal`) para crear `internal-dist/`. La carpeta contiene `config.js` interno, la aplicación, Leaflet y los datos individuales; está excluida de Git.
+3. Publicar **sólo `internal-dist/`** en Vercel, Netlify o un servidor institucional con autenticación/RBAC. Las instrucciones completas de protección están en [`DEPLOY_INTERNAL.md`](./DEPLOY_INTERNAL.md).
+4. Si se usa una API, pasar `--data-url` y `--locator-endpoint` al generador. Nunca subir el XLSX original, el JSON interno ni `internal-dist/` al repositorio público.
 
 El administrador realiza estos pasos una vez. El jefe recibe el enlace interno y sólo ve “Modo interno operativo” y “Datos internos cargados”; no modifica configuraciones ni levanta servidores.
 
@@ -121,8 +121,12 @@ Conservador, Base y Alto son simulaciones con supuestos ingresados por el usuari
 `config.public.js` · plantilla segura usada por GitHub Pages<br>
 `config.internal.js` · plantilla para despliegue protegido<br>
 `scripts/build-config.mjs` · genera `dist/config.js` para el modo elegido<br>
+`scripts/build-producer-data.mjs` · transforma la fuente local individual en JSON interno<br>
+`scripts/build-internal-dist.mjs` · arma el artefacto protegido sin modificar `dist/config.js`<br>
+`internal-dist/` · salida local ignorada, nunca versionar con datos reales<br>
 `dist/data/` · metadata y base agregada pública<br>
 `dist/data/geo/` · lugar reservado para GeoJSON oficial opcional<br>
 `dist/vendor/leaflet/` · Leaflet local y recursos con licencia BSD-2-Clause<br>
 `dist/assets/`, `dist/css/`, `dist/js/` · reservados para extensiones del artefacto estático<br>
 `CONTROL_DE_CALIDAD.md` · checklist de publicación
+`DEPLOY_INTERNAL.md` · guía de Vercel, Netlify e intranet

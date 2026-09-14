@@ -46,3 +46,13 @@
 - [ ] Productores con coordenadas compartidas muestran aviso sin alterar coordenadas
 - [ ] El localizador interno normaliza RENSPA/DNI/CUIT/CUIL sin imprimir ni mostrar el valor completo
 - [ ] `searchKeys` sólo existe en la salida interna ignorada y nunca en JSON agregado público
+
+## Artefacto interno protegido
+
+- [ ] `node scripts/build-internal-dist.mjs` generó `internal-dist/` sin modificar `dist/config.js`
+- [ ] `internal-dist/config.js` indica `APP_MODE: "internal"` y `PUBLIC_SAFE_MODE: false`
+- [ ] `internal-dist/data/interno/productores.json` sólo está en almacenamiento protegido
+- [ ] `internal-dist/` y `data/interno/` aparecen como ignorados por Git
+- [ ] El hosting exige autenticación antes de servir `index.html` o `data/interno/`
+- [ ] El enlace entregado al jefe no permite editar código ni cargar archivos
+- [ ] Se verificó una ventana sin sesión y no se compartió el repositorio ni tokens

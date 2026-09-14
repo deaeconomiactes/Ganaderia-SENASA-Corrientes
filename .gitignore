@@ -59,6 +59,8 @@ dist/data/interno/reporte_productores.json
 dist/data/interno/*.xlsx
 dist/data/interno/*.csv
 dist/data/interno/*.parquet
+/internal-dist/
+/data/interno/
 data/interno/productores.json
 data/interno/reporte_productores.json
 data/interno/*.csv

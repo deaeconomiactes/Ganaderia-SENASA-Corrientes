@@ -25,6 +25,18 @@ jobs:
         uses: actions/checkout@v4
       - name: Generar configuración pública segura
         run: node scripts/build-config.mjs public
+      - name: Verificar que el artefacto público no incluya datos internos
+        run: |
+          grep -q 'APP_MODE: "public"' dist/config.js
+          grep -q 'PUBLIC_SAFE_MODE: true' dist/config.js
+          grep -q 'SHOW_PRODUCER_POINTS: false' dist/config.js
+          grep -q 'INTERNAL_PRODUCER_DATA_URL: null' dist/config.js
+          test ! -e dist/data/interno/productores.json
+          test ! -e dist/data/interno/reporte_productores.json
+          if find dist/data/interno -type f \( -name '*.xlsx' -o -name '*.csv' -o -name '*.parquet' \) | grep -q .; then
+            echo 'Se detectó una fuente interna en el artefacto público.'
+            exit 1
+          fi
       - name: Configurar Pages
         uses: actions/configure-pages@v5
       - name: Crear artefacto estático
