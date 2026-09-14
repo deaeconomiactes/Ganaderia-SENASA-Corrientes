@@ -69,6 +69,11 @@ También se admite `--output` y `--report`. Para XLSX se usa el lector local `sc
 
 El pipeline descarta filas sin coordenadas válidas, con existencias negativas o sin identificación/ubicación administrativa. Conserva los ceros como advertencia, enmascara RENSPA y nunca copia DNI, CUIT, CUIL, titularidad o contactos al JSON de salida. La fuente original, `productores.json` y el reporte no deben subirse al repositorio público.
 
+Si ya existe un `productores.json` generado con una versión anterior del
+pipeline, volver a ejecutarlo para incorporar `searchKeys` y habilitar la
+búsqueda RENSPA/DNI/CUIT-CUIL del modo interno. No se puede reconstruir esa
+clave desde el RENSPA enmascarado.
+
 ## Ejecución local
 
 Desde `senasa-dashboard/`:
