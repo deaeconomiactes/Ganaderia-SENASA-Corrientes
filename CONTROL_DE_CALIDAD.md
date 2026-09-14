@@ -14,6 +14,8 @@
 - [ ] El sitio usa rutas relativas
 - [ ] README completo
 - [ ] Publicación lista para GitHub Pages
+- [ ] Workflow público genera `dist/config.js` desde `config.public.js`
+- [ ] No se incluyeron `config.internal.js` ni datos individuales en el artefacto público
 - [ ] Revisar artefacto final de Actions y archivos inesperados antes de anunciarlo
 - [ ] Panel interno de calidad oculto en publicación (`SHOW_INTERNAL_QUALITY_PANEL: false`)
 - [ ] Mapa público usa celdas agregadas y no puntos con coordenadas de establecimientos

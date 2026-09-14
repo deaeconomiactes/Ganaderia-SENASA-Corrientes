@@ -267,14 +267,15 @@
   }
 
   function isInternalOperationalMode() {
-    return APP_CONFIG.INTERNAL_MODE === true && APP_CONFIG.PUBLIC_SAFE_MODE !== true && APP_CONFIG.SHOW_PRODUCER_POINTS === true;
+    const configuredInternal = APP_CONFIG.APP_MODE === "internal" || (!APP_CONFIG.APP_MODE && APP_CONFIG.INTERNAL_MODE === true);
+    return configuredInternal && APP_CONFIG.PUBLIC_SAFE_MODE !== true && APP_CONFIG.SHOW_PRODUCER_POINTS === true;
   }
 
   async function loadInternalProducerSource() {
     const url = APP_CONFIG.INTERNAL_PRODUCER_DATA_URL;
     if (!url) {
       mapDebug("No hay INTERNAL_PRODUCER_DATA_URL configurado.");
-      return { records: [], message: "La base individual de productores no está disponible en esta publicación. Configure INTERNAL_PRODUCER_DATA_URL para visualizar puntos operativos." };
+      return { records: [], message: "No se encontró la fuente interna de productores. Contacte al administrador del dashboard." };
     }
     try {
       const response = await fetch(url, { cache: "no-store" });
@@ -283,11 +284,11 @@
       internalProducerLookup = normalized;
       const mapped = normalized.filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon) && item.lat >= -90 && item.lat <= 90 && item.lon >= -180 && item.lon <= 180);
       mapDebug("Productores cargados:", normalized.length, "con coordenadas válidas:", mapped.length);
-      return { records: mapped, allRecords: normalized, message: mapped.length ? "Base interna cargada para uso operativo." : "La base interna fue leída, pero no contiene latitud y longitud válidas por productor." };
+      return { records: mapped, allRecords: normalized, message: mapped.length ? "Datos internos cargados." : "No se pudo cargar la fuente interna. Contacte al administrador del dashboard." };
     } catch (_error) {
       internalProducerLookup = [];
       mapDebug("No se pudo cargar la fuente interna.");
-      return { records: [], message: "No se pudo cargar la fuente interna. Verifique la ruta local, permisos y formato del archivo." };
+      return { records: [], message: "No se pudo cargar la fuente interna. Contacte al administrador del dashboard." };
     }
   }
 
@@ -352,7 +353,7 @@
     setText("#mapFooterNotice", "Puntos operativos con coordenadas de la fuente interna; validar precisión y no publicar.");
     setText("#traceGrain", "Unidad productiva · punto georreferenciado"); setText("#tracePrivacy", "Modo interno autorizado. No publicar identificadores, contactos ni coordenadas sin control de acceso.");
     document.querySelector(".senasa-nav-note")?.replaceChildren(Object.assign(document.createElement("span"), { className: "status-dot" }), document.createTextNode("Modo interno operativo"));
-    const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = "<strong>Modo interno operativo</strong> · Esta vista contiene información desagregada para uso interno. No publicar sin autenticación ni control de acceso.";
+    const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = source.records?.length ? "<strong>Modo interno operativo</strong> · Datos internos cargados. No publicar sin autenticación ni control de acceso." : "<strong>Modo interno operativo</strong> · No se pudo cargar la fuente interna. Contacte al administrador del dashboard.";
     const state = { data, filters: readGlobalFilters(), category: "", minStock: 0, selected: null, records: source.records || [], map: null, markerLayer: null, boundaryLayer: null };
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     syncLocationControls(data, state.filters, controls);
@@ -583,7 +584,7 @@
 
   function showOperationalEmpty(message) {
     const empty = $("#producerMapEmpty"); if (!empty) return;
-    const text = message || "La base individual de productores no está disponible en esta publicación. Configure INTERNAL_PRODUCER_DATA_URL para visualizar puntos operativos.";
+    const text = message || "No se encontró la fuente interna de productores. Contacte al administrador del dashboard.";
     const failed = /Leaflet|inicializaci[oó]n|cargar el mapa/i.test(text);
     empty.hidden = false; empty.innerHTML = `<div><h3>${failed ? "No se pudo cargar el mapa" : "Modo interno preparado"}</h3><p>${escapeHtml(text)}</p></div>`;
   }

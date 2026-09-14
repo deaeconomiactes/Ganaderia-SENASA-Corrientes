@@ -1,0 +1,18 @@
+{
+  "records": [],
+  "_schema": {
+    "id": "identificador operativo no sensible",
+    "operational_id_masked": "identificador enmascarado para la ficha",
+    "LATITUD": "número decimal",
+    "LONGITUD": "número decimal",
+    "DEPTO": "departamento",
+    "MUNI": "municipio",
+    "OFICINA LOCAL": "oficina local",
+    "BOVINOS": 0,
+    "BUBALINOS": 0,
+    "OVINOS": 0,
+    "CAPRINOS": 0,
+    "PORCINOS": 0,
+    "EQUINOS": 0
+  }
+}

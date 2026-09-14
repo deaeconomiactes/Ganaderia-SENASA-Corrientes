@@ -53,3 +53,9 @@ dist/**/*.map
 dist/.openai/
 /dist/data/interno/*
 !/dist/data/interno/README.md
+!/dist/data/interno/productores.example.json
+data/interno/productores.json
+data/interno/*.csv
+data/interno/*.xlsx
+.env
+.env.local

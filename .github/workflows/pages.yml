@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
+      - name: Generar configuración pública segura
+        run: node scripts/build-config.mjs public
       - name: Configurar Pages
         uses: actions/configure-pages@v5
       - name: Crear artefacto estático
