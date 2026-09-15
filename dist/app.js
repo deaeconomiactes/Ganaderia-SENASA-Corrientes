@@ -7,7 +7,42 @@
     ["caprinos", "Caprinos", "#b694ef"],
     ["ovinos", "Ovinos", "#8dcf72"],
   ];
-  const PRODUCER_CATEGORIES = ["vacas", "vaquillonas", "novillos", "novillitos", "terneros", "terneras", "toros", "bueyes", "bufalas"];
+  const PRODUCER_CATEGORY_SCHEMA = {
+    bovinos: [
+      ["vacas", "Vacas", ["vacas", "vaca"]], ["vaquillonas", "Vaquillonas", ["vaquillonas", "vaquillona"]],
+      ["novillos", "Novillos", ["novillos", "novillo"]], ["novillitos", "Novillitos", ["novillitos", "novillito"]],
+      ["terneros", "Terneros", ["terneros", "ternero"]], ["terneras", "Terneras", ["terneras", "ternera"]],
+      ["toros", "Toros", ["toros", "toro"]], ["bueyes", "Bueyes", ["bueyes", "buey"]],
+      ["toritos_mej", "Toritos/MEJ", ["toritosmej"]],
+    ],
+    bubalinos: [
+      ["vacas_bub", "Vacas bubalinas", ["vacasbub"]], ["toros_bub", "Toros bubalinos", ["torosbub"]],
+      ["bueyes_bub", "Bueyes bubalinos", ["bueyesbub"]], ["novillos_bub", "Novillos bubalinos", ["novillosbub"]],
+      ["novillitos_bub", "Novillitos bubalinos", ["novillitosbub"]], ["vaquillonas_bub", "Vaquillonas bubalinas", ["vaquillonasbub"]],
+      ["toritos_mej_bub", "Toritos/MEJ bubalinos", ["toritosmejbub"]], ["terneros_bub", "Terneros bubalinos", ["ternerosbub"]],
+      ["terneras_bub", "Terneras bubalinas", ["ternerasbub"]],
+    ],
+    ovinos: [
+      ["carneros", "Carneros", ["carneros", "carnero"]], ["borregos_as", "Borregos/as", ["borregosas"]],
+      ["capones_ov", "Capones ovinos", ["caponesov"]], ["corderos_as", "Corderos/as", ["corderosas"]],
+    ],
+    caprinos: [
+      ["chivos", "Chivos", ["chivos", "chivo"]], ["cabrillas_chivitos", "Cabrillas/chivitos", ["cabrillaschivitos"]],
+      ["cabritos", "Cabritos", ["cabritos", "cabrito"]], ["capones_capr", "Capones caprinos", ["caponescapr"]],
+    ],
+    porcinos: [
+      ["cerdas", "Cerdas", ["cerdas", "cerda"]], ["lechones", "Lechones", ["lechones", "lechon"]],
+      ["capones_po_hembras_sin_servicio", "Capones / hembras sin servicio", ["caponespohembrassinservicio"]],
+      ["padrillos_po", "Padrillos porcinos", ["padrillospo"]],
+    ],
+    equinos: [
+      ["yeguas", "Yeguas", ["yeguas", "yegua"]], ["asnos", "Asnos", ["asnos", "asno"]],
+      ["burros", "Burros", ["burros", "burro"]], ["mulas", "Mulas", ["mulas", "mula"]],
+      ["padrillos_eq", "Padrillos equinos", ["padrilloseq"]], ["potrillos_as", "Potrillos/as", ["potrillosas"]],
+      ["equinos", "Equinos", ["equinos"]],
+    ],
+  };
+  const PRODUCER_CATEGORY_LABELS = Object.fromEntries(Object.values(PRODUCER_CATEGORY_SCHEMA).flat().map(([key, label]) => [key, label]));
   const MAP_VIEW = "0 0 800 620";
   const formatNumber = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 });
   const formatDecimal = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -177,7 +212,10 @@
   function setupCommon(data) {
     const totals = data.totales;
     const qualityPanel = $("#qualityPanel");
-    if (qualityPanel) qualityPanel.hidden = APP_CONFIG.SHOW_INTERNAL_QUALITY_PANEL !== true;
+    if (qualityPanel) {
+      qualityPanel.hidden = true;
+      qualityPanel.setAttribute("aria-hidden", "true");
+    }
     setText("#sidebarRecords", formatNumber.format(totals.registros));
     const now = new Date(data.metadata.actualizado);
     setText("#updateText", Number.isNaN(now.valueOf()) ? "Base cargada correctamente" : `Base cargada correctamente · actualizada ${now.toLocaleDateString("es-AR")}`);
@@ -185,6 +223,9 @@
     setText("#metricDensity", `${Number(totals.bovinos_por_registro || 0).toLocaleString("es-AR", { maximumFractionDigits: 1 })}`);
     renderTraceabilityBand(data);
     renderQualitySummary(data, defaultFilters(), data.municipios || []);
+    setText("#sourceInfo", `${data.metadata.alcance || ""} ${data.metadata.privacidad || ""} ${data.metadata.geometria || ""}`.trim());
+    const infoDialog = $("#infoDialog");
+    $("#infoButton")?.addEventListener("click", () => infoDialog?.showModal?.());
   }
 
   // Controles separados para que la validación sea auditable y extensible.
@@ -366,6 +407,9 @@
     const rows = Array.isArray(rawData) ? rawData : (rawData?.records || rawData?.rows || rawData?.data || []);
     if (!Array.isArray(rows)) return [];
     const fields = detectLivestockFields(rows);
+    const nestedCategoryKeys = new Set();
+    rows.forEach((row) => Object.keys(row?.categorias && typeof row.categorias === "object" ? row.categorias : {}).forEach((key) => nestedCategoryKeys.add(canonicalKey(key))));
+    const categoryKeys = Object.keys(PRODUCER_CATEGORY_LABELS).filter((key) => fields.categories[key] || nestedCategoryKeys.has(canonicalKey(key)));
     return rows.map((row, index) => {
       const get = (name) => row?.[fields[name]];
       // Always emit the canonical keys. The internal pipeline already writes
@@ -373,7 +417,7 @@
       // singular labels. Keeping zeros explicit prevents a missing key from
       // being interpreted as a missing species during filtering.
       const species = Object.fromEntries(SPECIES.map(([key]) => [key, positiveNumber(readLivestockValue(row, "especies", key, fields.species[key]))]));
-      const categories = Object.fromEntries(PRODUCER_CATEGORIES.map((key) => [key, positiveNumber(readLivestockValue(row, "categorias", key, fields.categories[key]))]));
+      const categories = Object.fromEntries(categoryKeys.map((key) => [key, positiveNumber(readLivestockValue(row, "categorias", key, fields.categories[key]))]));
       const totalFromSpecies = Object.values(species).reduce((total, current) => total + current, 0);
       const totalFromCategories = Object.values(categories).reduce((total, current) => total + current, 0);
       const totalFromParts = totalFromSpecies || totalFromCategories;
@@ -409,6 +453,7 @@
   function readLivestockValue(row, collectionName, canonical, flatField) {
     const collection = row?.[collectionName];
     if (collection && typeof collection === "object" && !Array.isArray(collection)) {
+      if (Object.prototype.hasOwnProperty.call(collection, canonical)) return collection[canonical];
       const key = Object.keys(collection).find((candidate) => canonicalKey(candidate) === canonicalKey(canonical));
       if (key !== undefined) return collection[key];
     }
@@ -419,7 +464,7 @@
     const keys = [...new Set(rows.slice(0, 30).flatMap((row) => Object.keys(row || {})))];
     const find = (aliases) => keys.find((key) => aliases.includes(canonicalKey(key)));
     const speciesAliases = { bovinos: ["bovinos", "bovino", "bov"], bubalinos: ["bubalinos", "bubalino", "bufalos", "bufalo"], ovinos: ["ovinos", "ovino", "ovejas"], caprinos: ["caprinos", "caprino", "cabras"], porcinos: ["porcinos", "porcino", "cerdos"], equinos: ["equinos", "equino", "caballos"] };
-    const categoryAliases = { vacas: ["vacas", "vaca"], vaquillonas: ["vaquillonas", "vaquillona"], novillos: ["novillos", "novillo"], novillitos: ["novillitos", "novillito"], terneros: ["terneros", "ternero"], terneras: ["terneras", "ternera"], toros: ["toros", "toro"], bueyes: ["bueyes", "buey"], bufalas: ["bufalas", "bufala"] };
+    const categoryAliases = Object.fromEntries(Object.values(PRODUCER_CATEGORY_SCHEMA).flat().map(([key, , aliases]) => [key, aliases]));
     return {
       id: find(["idproductor", "productorid", "idunidad", "unidadid", "idregistro", "registroid", "codigooperativo", "codigo", "id"]),
       internalId: find(["idinterno", "internoid", "codigooperativo"]), renspa: find(["renspa", "renspanro", "renspanumero", "uprenspa"]),
@@ -483,8 +528,11 @@
     activeOperationalState = state;
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     syncOperationalLocationControls(state.records, state.filters, controls);
-    bindOperationalLocationControls(state.records, state.filters, controls, () => { clearOperationalSelection(state); renderOperationalTerritory(data, state); });
-    populateOperationalCategories(state.records);
+    bindOperationalLocationControls(state.records, state.filters, controls, () => { clearOperationalSelection(state); renderOperationalTerritory(data, state); }, () => {
+      state.category = "";
+      updateCategoryOptions(state.filters.species, state);
+    });
+    updateCategoryOptions(state.filters.species, state);
     $("#producerCategorySelect")?.addEventListener("change", (event) => { state.category = event.target.value; clearOperationalSelection(state); renderOperationalTerritory(data, state); });
     $("#producerMinStock")?.addEventListener("input", (event) => { state.minStock = positiveNumber(event.target.value); clearOperationalSelection(state); renderOperationalTerritory(data, state); });
     $("#includeZeroStock")?.addEventListener("change", (event) => { state.includeZeroStock = Boolean(event.target.checked); clearOperationalSelection(state); renderOperationalTerritory(data, state); });
@@ -526,6 +574,7 @@
     const includeZero = $("#includeZeroStock"); if (includeZero) includeZero.checked = false;
     const locatorInput = $("#locatorInput"); if (locatorInput) locatorInput.value = "";
     syncOperationalLocationControls(state.records, state.filters, controls);
+    updateCategoryOptions(state.filters.species, state);
     saveGlobalFilters(state.filters);
     resetOperationalView(state);
     renderOperationalTerritory(state.data, state);
@@ -633,9 +682,6 @@
     const filters = readGlobalFilters();
     const preferredLayer = APP_CONFIG.MAP_PREFERRED_LAYER === "highest_available_aggregation" ? "grid" : (APP_CONFIG.MAP_PREFERRED_LAYER || "grid");
     const state = { filters, species: filters.species, department: filters.department, mapLevel: preferredLayer, mode: "browse", vertices: [], selected: [], activeGrids: [], projection: null, zoom: false };
-    setText("#sourceInfo", `${data.metadata.alcance} ${data.metadata.privacidad} ${data.metadata.geometria}`);
-    const dialog = $("#infoDialog");
-    $("#infoButton")?.addEventListener("click", () => dialog.showModal());
     const redraw = (resetLocation = false) => {
       if (resetLocation) {
         state.vertices = [];
@@ -702,12 +748,36 @@
     });
   }
 
-  function populateOperationalCategories(records) {
+  function getCategoriesForSpecies(speciesKey, producers) {
+    const normalizedSpecies = normalizeSpeciesKey(speciesKey);
+    const definitions = PRODUCER_CATEGORY_SCHEMA[normalizedSpecies] || [];
+    if (!definitions.length) return [];
+    const allowed = new Set(definitions.map(([key]) => key));
+    const present = new Set();
+    for (const item of producers || []) {
+      Object.keys(item.categorias || {}).forEach((key) => { if (allowed.has(key)) present.add(key); });
+      if (present.size === allowed.size) break;
+    }
+    return definitions.filter(([key]) => present.has(key)).map(([key, label]) => ({ key, label }));
+  }
+
+  function updateCategoryOptions(speciesKey, state) {
     const select = $("#producerCategorySelect");
-    if (!select) return;
-    const categories = [...new Set(records.flatMap((item) => Object.keys(item.categorias || {})))].sort();
-    select.innerHTML = `<option value="">Todas las categorías</option>${categories.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(titleCase(item))}</option>`).join("")}`;
-    $("#producerCategoryControl").hidden = !categories.length;
+    if (!select) return [];
+    const categories = getCategoriesForSpecies(speciesKey, state?.records || []);
+    const allowed = new Set(categories.map((item) => item.key));
+    if (state?.category && !allowed.has(state.category)) state.category = "";
+    select.disabled = !categories.length;
+    select.innerHTML = categories.length
+      ? `<option value="">Todas las categorías</option>${categories.map((item) => `<option value="${escapeHtml(item.key)}">${escapeHtml(item.label)}</option>`).join("")}`
+      : '<option value="">Sin categorías disponibles para esta especie</option>';
+    select.value = state?.category || "";
+    const control = $("#producerCategoryControl");
+    if (control) { control.hidden = false; control.classList.toggle("is-disabled", !categories.length); }
+    const hint = $("#producerCategoryHint");
+    if (hint) hint.textContent = categories.length ? `Categorías disponibles para ${speciesLabel(normalizeSpeciesKey(speciesKey))}.` : "Sin categorías disponibles para esta especie";
+    if (state) state.availableCategories = categories.map((item) => item.key);
+    return categories;
   }
 
   function operationalRows(state) {
@@ -716,6 +786,12 @@
     const all = state.records || [];
     const effective = state.includeZeroStock ? all : all.filter((item) => Number(item.totalExistencias) > 0);
     const selectedSpecies = filters.species === "all" ? "" : normalizeSpeciesKey(filters.species);
+    const compatibleCategories = state.availableCategories || getCategoriesForSpecies(selectedSpecies, state.records || []).map((item) => item.key);
+    if (state.category && !compatibleCategories.includes(state.category)) {
+      state.category = "";
+      const categorySelect = $("#producerCategorySelect");
+      if (categorySelect) categorySelect.value = "";
+    }
     const speciesAvailable = !selectedSpecies || effective.some((item) => speciesValue(item, selectedSpecies) > 0);
     state.speciesWarning = selectedSpecies && !speciesAvailable ? `La fuente interna no contiene valores positivos para ${speciesLabel(selectedSpecies)}.` : "";
     const bySpecies = !selectedSpecies || !speciesAvailable ? effective : effective.filter((item) => speciesValue(item, selectedSpecies) > 0 || (state.includeZeroStock && Number(item.totalExistencias) === 0));
@@ -780,12 +856,12 @@
     const species = state.filters.species && state.filters.species !== "all" ? state.filters.species : "bovinos";
     const total = rows.reduce((sumValue, item) => sumValue + item.totalExistencias, 0);
     const selectedSpecies = rows.reduce((sumValue, item) => sumValue + positiveNumber(item.especies?.[species]), 0);
-    const top = [...rows].sort((a, b) => b.totalExistencias - a.totalExistencias).slice(0, 5).reduce((sumValue, item) => sumValue + item.totalExistencias, 0);
+    const top = [...rows].sort((a, b) => speciesValue(b, species) - speciesValue(a, species)).slice(0, 5).reduce((sumValue, item) => sumValue + speciesValue(item, species), 0);
     setText("#metricRecords", formatNumber.format(rows.length));
     setText("#metricBovinos", formatNumber.format(selectedSpecies || total));
     setText("#territorySpeciesLabel", selectedSpecies ? speciesLabel(species).toUpperCase() : "EXISTENCIAS TOTALES");
-    setText("#metricDensity", rows.length ? `${(total / rows.length).toLocaleString("es-AR", { maximumFractionDigits: 1 })} cabezas / unidad` : "Sin unidades visibles");
-    setText("#metricConcentration", total ? `${Math.round((top / total) * 100)}%` : "—");
+    setText("#metricDensity", rows.length ? `${(selectedSpecies / rows.length).toLocaleString("es-AR", { maximumFractionDigits: 1 })} cabezas / unidad` : "Sin unidades visibles");
+    setText("#metricConcentration", selectedSpecies ? `${Math.round((top / selectedSpecies) * 100)}%` : "—");
     setText("#metricGrids", formatNumber.format(rows.length));
     setText("#metricMapped", `${formatNumber.format(rows.length)} georreferenciados · Según filtros activos`);
   }
@@ -801,7 +877,7 @@
     mapDebug("Marcadores operativos renderizados", { visibleRows: rows.length, markerGroups: groups.length, clustered: shouldCluster, zoom: state.map.getZoom() });
     groups.forEach((group) => {
       if (group.items.length > 1) {
-        const marker = L.marker([group.lat, group.lon], { icon: L.divIcon({ className: "", html: `<span class="producer-cluster">${formatNumber.format(group.items.length)}</span>`, iconSize: [38, 38], iconAnchor: [19, 19] }), zIndexOffset: 500 });
+        const marker = L.marker([group.lat, group.lon], { icon: L.divIcon({ className: "producer-cluster-icon", html: `<span class="producer-cluster">${formatNumber.format(group.items.length)}</span>`, iconSize: [46, 46], iconAnchor: [23, 23] }), zIndexOffset: 500, riseOnHover: true });
         marker.bindTooltip(`${formatNumber.format(group.items.length)} productores agrupados`, { direction: "top" });
         marker.on("click", () => {
           clearOperationalSelection(state);
@@ -816,9 +892,9 @@
       }
       const item = group.items[0];
       if ((state.selectedProducer || state.selected)?.id === item.id) return;
-      const radius = markerRadius(item.totalExistencias, rows);
+      const radius = markerRadius(speciesValue(item, state.filters.species), rows, state.filters.species);
       const markerColor = speciesColor(dominantProducerSpecies(item));
-      const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "", html: `<span class="producer-marker" style="width:${radius}px;height:${radius}px;background:${markerColor}"></span>`, iconSize: [radius, radius], iconAnchor: [radius / 2, radius / 2] }), zIndexOffset: 100 });
+      const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "producer-marker-icon", html: `<span class="producer-marker" style="--marker-color:${markerColor};width:${radius}px;height:${radius}px"></span>`, iconSize: [radius + 8, radius + 8], iconAnchor: [(radius + 8) / 2, (radius + 8) / 2] }), zIndexOffset: 100, riseOnHover: true });
       marker.bindTooltip(producerTooltip(item, state), { direction: "top", opacity: .96 });
       marker.on("click", () => selectProducer(item, { state, source: "map" }));
       state.markerLayer.addLayer(marker);
@@ -838,13 +914,14 @@
     return { ...group, lat: group.items.reduce((sumValue, item) => sumValue + item.lat, 0) / group.items.length, lon: group.items.reduce((sumValue, item) => sumValue + item.lon, 0) / group.items.length };
   }
 
-  function markerRadius(value, rows) { const max = Math.max(...rows.map((item) => item.totalExistencias), 1); return Math.round(10 + Math.min(12, Math.sqrt(Math.max(0, value) / max) * 12)); }
+  function markerRadius(value, rows, species) { const max = Math.max(...rows.map((item) => speciesValue(item, species)), 1); return Math.round(10 + Math.min(12, Math.sqrt(Math.max(0, value) / max) * 12)); }
   function speciesColor(species) { return ({ bovinos: "#2e8d89", bubalinos: "#b17841", ovinos: "#6d91ad", caprinos: "#8b72a5", porcinos: "#9c6472", equinos: "#597d92" })[species] || "#2e8d89"; }
   function sameCoordinateCount(item, records) { return (records || []).filter((candidate) => candidate.lat === item.lat && candidate.lon === item.lon).length; }
   function producerTooltip(item, state) {
     const sharedCount = sameCoordinateCount(item, state?.records);
     const shared = sharedCount > 1 ? `<span class="producer-shared-note">Ubicación compartida por ${formatNumber.format(sharedCount)} productores.</span>` : "";
-    return `<div class="producer-popup"><strong>${escapeHtml(item.displayId)}</strong><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(item.totalExistencias)}</b> existencias · ${escapeHtml(titleCase(dominantProducerSpecies(item)))}</span>${shared}</div>`;
+    const selectedSpecies = normalizeSpeciesKey(state?.filters?.species) || "bovinos";
+    return `<div class="producer-popup"><strong>${escapeHtml(item.displayId)}</strong><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(speciesValue(item, selectedSpecies))}</b> ${escapeHtml(speciesLabel(selectedSpecies).toLowerCase())} · ${formatNumber.format(item.totalExistencias)} total</span>${shared}</div>`;
   }
   function dominantProducerSpecies(item) {
     const dominant = Object.entries(item.especies || {}).sort((a, b) => b[1] - a[1])[0];
@@ -874,8 +951,9 @@
     const item = state.selectedProducer || state.selected;
     if (!layer || !state.map || !item || !validCoordinatePair(item.lat, item.lon)) return;
     const sharedCount = sameCoordinateCount(item, state.records);
-    const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "", html: `<span class="selected-producer-marker" aria-hidden="true"></span>`, iconSize: [30, 30], iconAnchor: [15, 15] }), zIndexOffset: 5000, riseOnHover: true });
-    marker.bindPopup(`<div class="producer-popup"><strong>Productor localizado</strong><span>${escapeHtml(item.displayId)}</span><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(item.totalExistencias)}</b> existencias</span>${sharedCount > 1 ? `<span class="producer-shared-note">Ubicación compartida por ${formatNumber.format(sharedCount)} productores.</span>` : ""}</div>`, { closeButton: true, autoPan: true });
+    const selectedSpecies = normalizeSpeciesKey(state.filters.species) || "bovinos";
+    const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "selected-producer-icon", html: `<span class="selected-producer-marker" aria-hidden="true"></span>`, iconSize: [38, 38], iconAnchor: [19, 19] }), zIndexOffset: 5000, riseOnHover: true });
+    marker.bindPopup(`<div class="producer-popup"><strong>Productor localizado</strong><span>${escapeHtml(item.displayId)}</span><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(speciesValue(item, selectedSpecies))}</b> ${escapeHtml(speciesLabel(selectedSpecies).toLowerCase())} · ${formatNumber.format(item.totalExistencias)} total</span>${sharedCount > 1 ? `<span class="producer-shared-note">Ubicación compartida por ${formatNumber.format(sharedCount)} productores.</span>` : ""}</div>`, { closeButton: true, autoPan: true });
     layer.addLayer(marker);
     state.selectedMarker = marker;
     marker.openPopup();
@@ -895,6 +973,7 @@
     state.includeZeroStock = true;
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     syncOperationalLocationControls(state.records, filters, controls);
+    updateCategoryOptions(filters.species, state);
     const includeZero = $("#includeZeroStock"); if (includeZero) includeZero.checked = true;
     const advanced = $("#producerAdvancedFilters"); if (advanced) advanced.open = false;
     saveGlobalFilters(filters);
@@ -905,7 +984,7 @@
     const selectedProducer = state.selectedProducer || state.selected;
     if (selectedProducer && APP_CONFIG.ENABLE_PRODUCER_DETAIL !== false) {
       list.hidden = true; detail.hidden = false; close.hidden = false;
-      detail.innerHTML = producerDetailMarkup(selectedProducer, { sharedCount: sameCoordinateCount(selectedProducer, state.records) });
+      detail.innerHTML = producerDetailMarkup(selectedProducer, { sharedCount: sameCoordinateCount(selectedProducer, state.records), species: state.filters.species, categories: state.availableCategories || [] });
       setText("#focusEyebrow", String(state.selectionSource || "").startsWith("search") ? "PRODUCTOR LOCALIZADO" : "FICHA OPERATIVA"); setText("#focusTitle", "Detalle de unidad"); setText("#focusFootnote", "Información interna desagregada. No compartir ni publicar sin autorización.");
       return;
     }
@@ -922,22 +1001,26 @@
       setText("#focusEyebrow", isSearch ? "RESULTADOS DEL LOCALIZADOR" : "CLUSTER OPERATIVO");
       setText("#focusTitle", isSearch ? "Productores localizados" : "Productores agrupados");
       setText("#focusFootnote", "Seleccione una fila para centrar el mapa y abrir la ficha desagregada.");
-      list.innerHTML = `<p class="cluster-summary">${isSearch ? "Coincidencias encontradas en la fuente interna." : "El mapa agrupa puntos coincidentes para mantener la legibilidad."}</p>${matches.slice(0, 20).map((item, index) => `<button class="ranking-item operational-focus-row cluster-list-item" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio, item.oficinaLocal].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(item.totalExistencias)}</b><em class="ranking-unit">cabezas</em></span></button>`).join("")}${matches.length > 20 ? `<p class="cluster-summary">Se muestran las primeras 20 de ${formatNumber.format(matches.length)} coincidencias.</p>` : ""}`;
+      list.innerHTML = `<p class="cluster-summary">${isSearch ? "Coincidencias encontradas en la fuente interna." : "El mapa agrupa puntos coincidentes para mantener la legibilidad."}</p>${matches.slice(0, 20).map((item, index) => `<button class="ranking-item operational-focus-row cluster-list-item" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio, item.oficinaLocal].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em></span></button>`).join("")}${matches.length > 20 ? `<p class="cluster-summary">Se muestran las primeras 20 de ${formatNumber.format(matches.length)} coincidencias.</p>` : ""}`;
       list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = matches.find((row) => row.id === button.dataset.producerId); if (item) selectProducer(item, { state, source: isSearch ? "search-result-list" : "cluster-list", ensureVisible: isSearch }); }));
       return;
     }
     setText("#focusEyebrow", "RANKING OPERATIVO"); setText("#focusTitle", "Unidades destacadas"); setText("#focusFootnote", "Seleccione un productor en el mapa para consultar su ficha operativa.");
-    list.innerHTML = rows.length ? [...rows].sort((a, b) => b.totalExistencias - a.totalExistencias).slice(0, 7).map((item, index) => `<button class="ranking-item operational-focus-row" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(item.totalExistencias)}</b><em class="ranking-unit">cabezas</em></span></button>`).join("") : "<p class=\"empty-panel-message\">No hay productores visibles para los filtros seleccionados.</p>";
+    list.innerHTML = rows.length ? [...rows].sort((a, b) => speciesValue(b, state.filters.species) - speciesValue(a, state.filters.species)).slice(0, 7).map((item, index) => `<button class="ranking-item operational-focus-row" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em></span></button>`).join("") : "<p class=\"empty-panel-message\">No hay productores visibles para los filtros seleccionados.</p>";
     list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = rows.find((row) => row.id === button.dataset.producerId); if (item) selectProducer(item, { state, source: "ranking" }); }));
   }
 
   function producerDetailMarkup(item, options = {}) {
     const total = item.totalExistencias || 1;
-    const bars = (collection) => Object.entries(collection || {}).sort((a, b) => b[1] - a[1]).map(([key, value]) => `<div class="producer-bar"><span>${escapeHtml(titleCase(key))}</span><i style="--share:${Math.min(100, value / total * 100)}%"></i><b>${formatNumber.format(value)}</b></div>`).join("") || "<p class=\"empty-panel-message\">No se informaron valores desagregados.</p>";
-    const categoryRows = Object.entries(item.categorias || {}).sort((a, b) => b[1] - a[1]).map(([key, value]) => `<tr><td>${escapeHtml(titleCase(key))}</td><td>${formatNumber.format(value)}</td></tr>`).join("") || "<tr><td colspan=\"2\">Sin categorías informadas.</td></tr>";
+    const selectedSpecies = normalizeSpeciesKey(options.species) || "bovinos";
+    const selectedSpeciesValue = speciesValue(item, selectedSpecies);
+    const orderedSpecies = Object.entries(item.especies || {}).sort((a, b) => a[0] === selectedSpecies ? -1 : b[0] === selectedSpecies ? 1 : b[1] - a[1]);
+    const bars = orderedSpecies.map(([key, value]) => `<div class="producer-bar${key === selectedSpecies ? " is-priority" : ""}"><span>${escapeHtml(speciesLabel(key))}</span><i style="--share:${Math.min(100, value / total * 100)}%"></i><b>${formatNumber.format(value)}</b></div>`).join("") || "<p class=\"empty-panel-message\">No se informaron valores desagregados.</p>";
+    const compatible = new Set(options.categories || []);
+    const categoryRows = Object.entries(item.categorias || {}).filter(([key, value]) => compatible.has(key) && positiveNumber(value) > 0).sort((a, b) => b[1] - a[1]).map(([key, value]) => `<tr><td>${escapeHtml(PRODUCER_CATEGORY_LABELS[key] || titleCase(key.replaceAll("_", " ")))}</td><td>${formatNumber.format(value)}</td></tr>`).join("") || `<tr><td colspan="2">Sin categorías de ${escapeHtml(speciesLabel(selectedSpecies).toLowerCase())} informadas.</td></tr>`;
     const location = [item.departamento, item.municipio, item.oficinaLocal, item.paraje].filter(Boolean).join(" · ") || "Ubicación administrativa no informada";
     const sharedNotice = Number(options.sharedCount || 0) > 1 ? `<p class="producer-shared-note">Ubicación compartida por ${formatNumber.format(options.sharedCount)} productores.</p>` : "";
-    return `<div class="producer-detail-header"><h3>${escapeHtml(item.displayId)}</h3><p>${escapeHtml(location)}</p><small class="producer-detail-id">ID operativo: ${escapeHtml(item.id)}${item.renspaMasked ? ` · RENSPA: ${escapeHtml(item.renspaMasked)}` : ""}</small>${sharedNotice}</div><div class="producer-kpis"><div><span>Existencias</span><strong>${formatNumber.format(item.totalExistencias)}</strong></div><div><span>Especie dominante</span><strong>${escapeHtml(titleCase(dominantProducerSpecies(item)))}</strong></div></div><section class="producer-detail-section"><h4>Existencias por especie</h4><div class="producer-bars">${bars(item.especies)}</div></section><section class="producer-detail-section"><h4>Categorías ganaderas</h4><table class="producer-detail-table"><tbody>${categoryRows}</tbody></table></section>`;
+    return `<div class="producer-detail-header"><h3>${escapeHtml(item.displayId)}</h3><p>${escapeHtml(location)}</p><small class="producer-detail-id">ID operativo: ${escapeHtml(item.id)}${item.renspaMasked ? ` · RENSPA: ${escapeHtml(item.renspaMasked)}` : ""}</small>${sharedNotice}</div><div class="producer-kpis"><div class="is-priority"><span>${escapeHtml(speciesLabel(selectedSpecies))}</span><strong>${formatNumber.format(selectedSpeciesValue)}</strong></div><div><span>Total general</span><strong>${formatNumber.format(item.totalExistencias)}</strong></div></div><section class="producer-detail-section"><h4>Existencias por especie</h4><div class="producer-bars">${bars}</div></section><section class="producer-detail-section"><h4>Categorías de ${escapeHtml(speciesLabel(selectedSpecies))}</h4><table class="producer-detail-table"><tbody>${categoryRows}</tbody></table></section>`;
   }
 
   function renderOperationalFilterChips(state, count) {
@@ -947,7 +1030,7 @@
       ["Departamento", state.filters.department !== "all" ? titleCase(state.filters.department) : "Todos"],
       ["Municipio", state.filters.municipality ? titleCase(state.filters.municipality) : "Todos"],
       ["Oficina local", state.filters.office ? titleCase(state.filters.office) : "Todas"],
-      ["Categoría", state.category ? titleCase(state.category) : "Todas"],
+      ["Categoría", state.category ? (PRODUCER_CATEGORY_LABELS[state.category] || titleCase(state.category.replaceAll("_", " "))) : state.availableCategories?.length ? "Todas" : "Sin categorías disponibles"],
       ["Mínimo", state.minStock ? `${formatNumber.format(state.minStock)} cabezas` : "Sin mínimo"],
       ["Cero", state.includeZeroStock ? "Incluidos" : "Excluidos"],
     ];
@@ -1443,9 +1526,9 @@
     if (controls.office) controls.office.value = filters.office ? locationValue([filters.department, filters.municipality, filters.office]) : "";
   }
 
-  function bindOperationalLocationControls(records, filters, controls, onChange) {
+  function bindOperationalLocationControls(records, filters, controls, onChange, onSpeciesChange) {
     const update = () => { syncOperationalLocationControls(records, filters, controls); saveGlobalFilters(filters); onChange(); };
-    controls.species?.addEventListener("change", () => { filters.species = normalizeSpeciesKey(controls.species.value) || "bovinos"; update(); });
+    controls.species?.addEventListener("change", () => { filters.species = normalizeSpeciesKey(controls.species.value) || "bovinos"; onSpeciesChange?.(); update(); });
     controls.department?.addEventListener("change", () => { filters.department = controls.department.value; filters.municipality = ""; filters.office = ""; update(); });
     controls.municipality?.addEventListener("change", () => {
       if (!controls.municipality.value) { filters.municipality = ""; filters.office = ""; update(); return; }

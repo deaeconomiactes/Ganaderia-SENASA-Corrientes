@@ -20,6 +20,12 @@ def json_value(value):
 
 
 def main() -> int:
+    # Windows can default stdout to a legacy code page. The JSON bridge must
+    # always emit UTF-8 so locality names never break the Node.js pipeline.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
     if len(sys.argv) != 2:
         print("Uso: read-xlsx-json.py RUTA_XLSX", file=sys.stderr)
         return 2

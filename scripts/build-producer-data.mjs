@@ -6,7 +6,15 @@ import { spawnSync } from "node:child_process";
 import { projectRoot } from "./sites-env.mjs";
 
 const SPECIES = ["bovinos", "bubalinos", "ovinos", "caprinos", "porcinos", "equinos"];
-const CATEGORIES = ["vacas", "vaquillonas", "novillos", "novillitos", "terneros", "terneras", "toros"];
+const CATEGORY_SCHEMA = {
+  bovinos: { vacas: ["vacas", "vaca"], vaquillonas: ["vaquillonas", "vaquillona"], novillos: ["novillos", "novillo"], novillitos: ["novillitos", "novillito"], terneros: ["terneros", "ternero"], terneras: ["terneras", "ternera"], toros: ["toros", "toro"], bueyes: ["bueyes", "buey"], toritos_mej: ["toritosmej"] },
+  bubalinos: { vacas_bub: ["vacasbub"], toros_bub: ["torosbub"], bueyes_bub: ["bueyesbub"], novillos_bub: ["novillosbub"], novillitos_bub: ["novillitosbub"], vaquillonas_bub: ["vaquillonasbub"], toritos_mej_bub: ["toritosmejbub"], terneros_bub: ["ternerosbub"], terneras_bub: ["ternerasbub"] },
+  ovinos: { carneros: ["carneros", "carnero"], borregos_as: ["borregosas"], capones_ov: ["caponesov"], corderos_as: ["corderosas"] },
+  caprinos: { chivos: ["chivos", "chivo"], cabrillas_chivitos: ["cabrillaschivitos"], cabritos: ["cabritos", "cabrito"], capones_capr: ["caponescapr"] },
+  porcinos: { cerdas: ["cerdas", "cerda"], lechones: ["lechones", "lechon"], capones_po_hembras_sin_servicio: ["caponespohembrassinservicio"], padrillos_po: ["padrillospo"] },
+  equinos: { yeguas: ["yeguas", "yegua"], asnos: ["asnos", "asno"], burros: ["burros", "burro"], mulas: ["mulas", "mula"], padrillos_eq: ["padrilloseq"], potrillos_as: ["potrillosas"], equinos: ["equinos"] },
+};
+const CATEGORY_ALIASES = Object.assign({}, ...Object.values(CATEGORY_SCHEMA));
 const args = process.argv.slice(2);
 const sourceArg = args.find((arg) => !arg.startsWith("--"));
 const option = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
@@ -65,12 +73,12 @@ rows.forEach((row, index) => {
   const coordinatesValid = Number.isFinite(lat) && Number.isFinite(lon);
   if (!coordinatesValid) report.withoutCoordinates += 1;
   else report.withValidCoordinates += 1;
-  const rawNumericValues = [...SPECIES.map((species) => parseNumeric(valueAt(row, fields.species[species]))), ...CATEGORIES.map((category) => parseNumeric(valueAt(row, fields.categories[category])))];
+  const rawNumericValues = [...SPECIES.map((species) => parseNumeric(valueAt(row, fields.species[species]))), ...Object.values(fields.categories).map((field) => parseNumeric(valueAt(row, field)))];
   if (rawNumericValues.some((value) => Number.isFinite(value) && value < 0)) { report.negativeExistenceRows += 1; return; }
   if (!coordinatesValid) return;
   const values = {
     especies: Object.fromEntries(SPECIES.map((species) => [species, positiveNumber(valueAt(row, fields.species[species]))])),
-    categorias: Object.fromEntries(CATEGORIES.map((category) => [category, positiveNumber(valueAt(row, fields.categories[category]))])),
+    categorias: Object.fromEntries(Object.entries(fields.categories).map(([category, field]) => [category, positiveNumber(valueAt(row, field))])),
   };
   const totalExistencias = sum(Object.values(values.especies)) || sum(Object.values(values.categorias));
   if (totalExistencias === 0) report.totalZeroRows += 1;
@@ -156,19 +164,18 @@ function detectDelimiter(text) { const firstLine = text.split(/\r?\n/, 1)[0]; re
 function detectFields(headers) {
   const find = (aliases) => headers.find((header) => aliases.includes(canonical(header)));
   const speciesAliases = { bovinos: ["bovinos", "bovino", "bov"], bubalinos: ["bubalinos", "bubalino", "bufalos", "bufalo"], ovinos: ["ovinos", "ovino", "ovejas"], caprinos: ["caprinos", "caprino", "cabras"], porcinos: ["porcinos", "porcino", "cerdos"], equinos: ["equinos", "equino", "caballos"] };
-  const categoryAliases = { vacas: ["vacas", "vaca"], vaquillonas: ["vaquillonas", "vaquillona"], novillos: ["novillos", "novillo"], novillitos: ["novillitos", "novillito"], terneros: ["terneros", "ternero"], terneras: ["terneras", "ternera"], toros: ["toros", "toro"] };
   const id = find(["idproductor", "productorid", "idunidad", "unidadid", "idregistro", "registroid", "codigooperativo", "codigo", "id"]);
   const renspa = find(["renspa", "renspanro", "renspanumero", "uprenspa"]);
   const dni = find(["dni", "documento", "documentonro", "documentonumero"]);
   const cuitCuil = find(["cuit", "cuil", "cuitcuil", "cuitcuilnro"]);
   const recognized = new Set([id, renspa, dni, cuitCuil].filter(Boolean).map(canonical));
   const species = Object.fromEntries(Object.entries(speciesAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
-  const categories = Object.fromEntries(Object.entries(categoryAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
+  const categories = Object.fromEntries(Object.entries(CATEGORY_ALIASES).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
   const fields = { idOrRenspa: id || renspa, id, renspa, dni, cuitCuil, departamento: find(["departamento", "depto", "dep"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
   [fields.departamento, fields.municipio, fields.oficina, fields.paraje, fields.lat, fields.lon, ...Object.values(species), ...Object.values(categories)].filter(Boolean).forEach((field) => recognized.add(canonical(field)));
   return fields;
 }
-function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuitCuil: fields.cuitCuil || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories }; }
+function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuitCuil: fields.cuitCuil || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories, categoriesBySpecies: Object.fromEntries(Object.entries(CATEGORY_SCHEMA).map(([species, definitions]) => [species, Object.keys(definitions).filter((key) => Boolean(fields.categories[key]))])) }; }
 function canonical(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function valueAt(row, field) { return field ? row[field] : ""; }
 function cleanValue(value) { return String(value ?? "").trim().slice(0, 160); }
