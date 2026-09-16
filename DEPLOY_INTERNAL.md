@@ -5,7 +5,7 @@ Este documento describe el flujo recomendado para entregar el mapa operativo a u
 ## Separación público / interno
 
 - **GitHub Pages (público):** sirve `dist/` con `config.public.js`. Es una vista agregada, sin productores individuales y sin resolución de RENSPA/DNI/CUIT/CUIL.
-- **Hosting interno protegido:** sirve `internal-dist/`, generado localmente. Contiene `config.js` en modo interno y `data/interno/productores.json`, por lo que sólo debe quedar detrás de autenticación, VPN/intranet o un proxy institucional.
+- **Hosting interno protegido:** sirve `internal-dist/`, generado localmente. Contiene `config.js` en modo interno y el manifest más los fragmentos `data/interno/productores-*.json`, por lo que sólo debe quedar detrás de autenticación, VPN/intranet o un proxy institucional.
 
 `internal-dist/`, `data/interno/` y los archivos individuales están excluidos por `.gitignore`. No se debe forzar su inclusión en el repositorio público.
 
@@ -64,15 +64,17 @@ node scripts/build-config.mjs public
 ## Opción A — Vercel con protección
 
 1. Generar `internal-dist/` en una máquina administrativa con acceso a la base.
-2. Crear un proyecto privado en Vercel. No conectar un workflow público que publique automáticamente `dist/`.
-3. Como proyecto estático, usar `internal-dist` como **Root Directory**, sin build command y con output directory `.`. Alternativamente, desde la terminal:
+2. Usar el proyecto existente `deaeconomiactes/senasa-ganaderia-interno`. No conectar un workflow público que publique automáticamente `dist/`.
+3. Vincular la carpeta local al proyecto existente y publicar el artefacto estático:
 
    ```powershell
-   npx vercel --cwd internal-dist
-   npx vercel --prod --cwd internal-dist
+   vercel link --yes --project senasa-ganaderia-interno --cwd internal-dist --scope deaeconomiactes
+   vercel --prod --cwd internal-dist --scope deaeconomiactes
    ```
 
-4. Activar **Deployment Protection / Vercel Authentication** y restringir el proyecto al equipo o a los correos autorizados. Para que también quede protegido el dominio de producción, elegir un alcance equivalente a **All Deployments** (según el plan puede requerir Pro con el complemento avanzado o Enterprise); la protección estándar puede dejar el dominio de producción accesible. Verificar que una ventana sin sesión no pueda abrir `index.html` ni `data/interno/productores.json`.
+   `build-internal-dist.mjs` conserva `.vercel/` y `.env.local` dentro de la carpeta ignorada para que las reconstrucciones futuras sigan apuntando al mismo proyecto.
+
+4. En **Settings → Deployment Protection**, activar **Vercel Authentication** con alcance **All Deployments** (incluye Production) y autorizar al equipo/correos correspondientes. Verificar que una ventana sin sesión no pueda abrir `index.html`, el manifest ni ningún `data/interno/productores-*.json`.
 5. Compartir al jefe sólo el dominio protegido. No compartir tokens de despliegue ni el directorio local.
 
 Cuando el proveedor no ofrece autenticación suficiente para el nivel de sensibilidad requerido, usar Vercel detrás de SSO, VPN o un proxy institucional; no convertir el enlace en público.
@@ -133,7 +135,7 @@ Select-String -Path dist/config.js -Pattern 'APP_MODE|PUBLIC_SAFE_MODE|SHOW_PROD
 git status --short --ignored
 ```
 
-La configuración pública debe indicar `APP_MODE: "public"`, `PUBLIC_SAFE_MODE: true`, `SHOW_PRODUCER_POINTS: false` e `INTERNAL_PRODUCER_DATA_URL: null`. `git status` debe mostrar `internal-dist/` y `data/interno/` como ignorados, nunca como archivos listos para commit. El workflow de Pages sólo debe publicar `dist/`.
+La configuración pública debe indicar `APP_MODE: "public"`, `PUBLIC_SAFE_MODE: true`, `SHOW_PRODUCER_POINTS: false` e `INTERNAL_PRODUCER_DATA_URL: null`. `git status` debe mostrar `internal-dist/` y `data/interno/` como ignorados, nunca como archivos listos para commit. El workflow de Pages sólo debe publicar `dist/`; el manifest y los fragmentos internos no deben aparecer bajo `dist/` versionado.
 
 ## Riesgos pendientes
 

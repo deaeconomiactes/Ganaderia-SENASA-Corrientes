@@ -57,9 +57,17 @@
   let internalProducerLookup = [];
   let activeOperationalState = null;
   let missingRenspaKeyWarningShown = false;
+  const DEBUG_SENSITIVE_KEYS = /^(lat|lon|latitude|longitude|south|west|north|east|renspa|dni|cuit|cuil|nombre|name|domicilio|direccion|coordinatesExact)$/i;
+  function sanitizeMapDebug(value, key = "") {
+    if (DEBUG_SENSITIVE_KEYS.test(key)) return "[omitido]";
+    if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeMapDebug(item));
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).slice(0, 40).map(([childKey, childValue]) => [childKey, sanitizeMapDebug(childValue, childKey)]));
+    if (typeof value === "string") return value.length > 240 ? `${value.slice(0, 237)}…` : value;
+    return value;
+  }
   const mapDebug = (...args) => {
     if (APP_CONFIG.DEBUG_MAP !== true) return;
-    const safeArgs = args.map((item) => item && typeof item === "object" ? JSON.stringify(item) : String(item));
+    const safeArgs = args.map((item) => item && typeof item === "object" ? JSON.stringify(sanitizeMapDebug(item)) : String(item));
     console.info(`[SENASA mapa] ${safeArgs.join(" ")}`);
   };
   setupNavigation();
@@ -343,23 +351,117 @@
     return configuredInternal && APP_CONFIG.PUBLIC_SAFE_MODE !== true && APP_CONFIG.SHOW_PRODUCER_POINTS === true;
   }
 
+  function internalLoadError(code, message, details = {}) {
+    const error = new Error(message);
+    error.code = code;
+    Object.assign(error, details);
+    return error;
+  }
+
+  function absoluteInternalUrl(resourceUrl, baseUrl = window.location.href) {
+    const raw = String(resourceUrl || "").trim();
+    if (!raw) throw internalLoadError("manifest-invalid", "El manifest interno no contiene una ruta válida.");
+    const pageBase = new URL(baseUrl, window.location.href);
+    // Chunk URLs are intentionally rooted at the site (the manifest stores
+    // ./data/interno/...). Resolving them against the manifest directory would
+    // incorrectly produce /data/interno/data/interno/....
+    if (/^\.?\/data\//i.test(raw) || /^data\//i.test(raw)) return new URL(raw.replace(/^\.\//, ""), `${pageBase.origin}/`).toString();
+    return new URL(raw, pageBase).toString();
+  }
+
+  function debugResourceLabel(resourceUrl) {
+    try {
+      const pathname = new URL(resourceUrl, window.location.href).pathname;
+      return pathname.split("/").filter(Boolean).slice(-2).join("/") || pathname;
+    } catch (_error) {
+      return "recurso interno";
+    }
+  }
+
+  function chunkRecords(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== "object") throw internalLoadError("chunk-invalid", "El fragmento interno no es un objeto JSON válido.");
+    for (const key of ["records", "data", "rows", "producers"]) {
+      if (Array.isArray(payload[key])) return payload[key];
+    }
+    throw internalLoadError("chunk-invalid", "El fragmento interno no contiene un array de productores.");
+  }
+
+  function internalLoadMessage(error) {
+    if (error?.code === "manifest-http") return `No se encontró el manifest interno (HTTP ${error.status || "desconocido"}). Revise la ruta y los permisos del despliegue.`;
+    if (error?.code === "manifest-network") return "No se pudo solicitar el manifest interno. Revise la conectividad y la protección del despliegue.";
+    if (error?.code === "manifest-invalid") return "El manifest interno no tiene el formato esperado. Revise format y chunks.";
+    if (error?.code === "chunks-unavailable") return "No se pudieron cargar los fragmentos internos. Revise rutas, permisos y estados HTTP en Network.";
+    if (error?.code === "chunks-invalid") return "Los fragmentos internos no tienen un formato válido. Revise que cada archivo contenga un array de productores.";
+    if (error?.code === "no-coordinates") return "Productores cargados pero sin coordenadas válidas. Revise la base interna.";
+    return "No se pudo cargar la fuente interna. Contacte al administrador del dashboard.";
+  }
+
   async function loadInternalProducerSource() {
     const url = APP_CONFIG.INTERNAL_PRODUCER_DATA_URL;
     if (!url) {
       mapDebug("No hay INTERNAL_PRODUCER_DATA_URL configurado.");
       return { records: [], message: "No se encontró la fuente interna de productores. Contacte al administrador del dashboard." };
     }
+    let manifestUrl;
     try {
-      const response = await fetch(url, { cache: "no-store" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      let payload = await response.json();
-      if (payload?.format === "senasa-producers-chunks-v1" && Array.isArray(payload.chunks)) {
-        const chunkPayloads = await Promise.all(payload.chunks.map(async (chunk) => {
-          const chunkResponse = await fetch(new URL(chunk.url, response.url), { cache: "no-store" });
-          if (!chunkResponse.ok) throw new Error(`HTTP ${chunkResponse.status} al leer un fragmento de la fuente interna.`);
-          return chunkResponse.json();
+      manifestUrl = absoluteInternalUrl(url);
+      mapDebug("Manifest interno solicitado", { url: manifestUrl });
+      let response;
+      try {
+        response = await fetch(manifestUrl, { cache: "no-store" });
+      } catch (error) {
+        throw internalLoadError("manifest-network", error?.message || "Error de red al solicitar el manifest.");
+      }
+      mapDebug("Respuesta del manifest interno", { status: response.status, ok: response.ok });
+      if (!response.ok) throw internalLoadError("manifest-http", `HTTP ${response.status}`, { status: response.status });
+      let payload;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        throw internalLoadError("manifest-invalid", error?.message || "JSON inválido en el manifest interno.");
+      }
+      const hasChunkList = Array.isArray(payload?.chunks) || Array.isArray(payload?.files) || Array.isArray(payload?.fragments);
+      if (hasChunkList && payload?.format !== "senasa-producers-chunks-v1") throw internalLoadError("manifest-invalid", "El manifest declara fragmentos, pero no usa senasa-producers-chunks-v1.");
+      const isChunkManifest = payload?.format === "senasa-producers-chunks-v1";
+      if (isChunkManifest) {
+        const manifestChunks = Array.isArray(payload.chunks) ? payload.chunks : (Array.isArray(payload.files) ? payload.files : (Array.isArray(payload.fragments) ? payload.fragments : null));
+        if (!manifestChunks?.length) throw internalLoadError("manifest-invalid", "El manifest no contiene chunks.");
+        mapDebug("Manifest interno válido", { chunksTotal: manifestChunks.length, recordsDeclared: Number(payload.records) || 0 });
+        const chunkResults = await Promise.allSettled(manifestChunks.map(async (chunk, index) => {
+          const chunkResource = chunk?.url || chunk?.path || chunk?.href;
+          const chunkUrl = absoluteInternalUrl(chunkResource, manifestUrl);
+          let chunkResponse;
+          try {
+            chunkResponse = await fetch(chunkUrl, { cache: "no-store" });
+          } catch (error) {
+            throw internalLoadError("chunk-network", error?.message || "Error de red al solicitar el fragmento.", { index, chunkUrl });
+          }
+          if (!chunkResponse.ok) throw internalLoadError("chunk-http", `HTTP ${chunkResponse.status}`, { index, chunkUrl, status: chunkResponse.status });
+          let chunkPayload;
+          try {
+            chunkPayload = await chunkResponse.json();
+          } catch (error) {
+            throw internalLoadError("chunk-invalid", error?.message || "JSON inválido en el fragmento.", { index, chunkUrl });
+          }
+          const records = chunkRecords(chunkPayload);
+          return { index, chunkUrl, records };
         }));
-        payload = { records: chunkPayloads.flat(), report: payload.report || undefined };
+        const loadedChunks = [];
+        const failedChunks = [];
+        chunkResults.forEach((result, index) => {
+          if (result.status === "fulfilled") loadedChunks.push(result.value);
+          else {
+            const reason = result.reason || {};
+            failedChunks.push({ index, status: reason.status || null, code: reason.code || "chunk-error", resource: debugResourceLabel(reason.chunkUrl || manifestChunks[index]?.url || manifestChunks[index]?.path || manifestChunks[index]?.href) });
+          }
+        });
+        mapDebug("Carga de fragmentos internos", { chunksTotal: manifestChunks.length, chunksLoaded: loadedChunks.length, chunksFailed: failedChunks.length, failed: failedChunks });
+        if (!loadedChunks.length) throw internalLoadError(failedChunks.some((item) => item.code === "chunk-invalid") ? "chunks-invalid" : "chunks-unavailable", "No se pudo cargar ningún fragmento.", { failedChunks });
+        const combinedRecords = loadedChunks.flatMap((item) => item.records);
+        mapDebug("Productores combinados desde fragmentos", { chunksLoaded: loadedChunks.length, recordsCombined: combinedRecords.length });
+        payload = { records: combinedRecords, report: payload.report || undefined };
+        payload._fragmentSummary = { chunksTotal: manifestChunks.length, chunksLoaded: loadedChunks.length, chunksFailed: failedChunks.length, partial: failedChunks.length > 0 };
       }
       missingRenspaKeyWarningShown = false;
       const normalized = normalizeProducerData(payload);
@@ -384,25 +486,33 @@
       const mapped = withCoordinates;
       const effective = normalized.filter((item) => item.totalExistencias > 0).length;
       const zeroTotal = normalized.filter((item) => item.totalExistencias === 0).length;
+      const fragmentSummary = payload?._fragmentSummary || {};
       const summary = {
         rawRows: Number(sourceReport.rowsRead ?? normalized.length),
         normalizedRows: Number(sourceReport.validProducers ?? normalized.length),
-        coordinateRows: Number(sourceReport.withValidCoordinates ?? mapped.length),
+        coordinateRows: mapped.length,
         coordinateRowsOutsideProvince: outsideCorrientes,
-        missingCoordinates: Number(sourceReport.withoutCoordinates ?? (normalized.length - withCoordinates.length)),
+        missingCoordinates: normalized.length - withCoordinates.length,
         effectiveRows: effective,
         zeroTotalRows: zeroTotal,
         negativeTotalRows: normalized.filter((item) => item.totalExistencias < 0).length,
         departments: countValues(normalized, "departamento"),
         renspaSearchKeys: normalized.filter((item) => Boolean(item.searchKeys?.renspa)).length,
         speciesRows: Object.fromEntries(SPECIES.map(([key]) => [key, normalized.filter((item) => speciesValue(item, key) > 0).length])),
+        ...fragmentSummary,
       };
       mapDebug("Fuente interna normalizada", summary);
-      return { records: mapped, allRecords: normalized, summary, message: mapped.length ? "Datos internos cargados." : "No se pudo cargar la fuente interna. Contacte al administrador del dashboard." };
+      if (normalized.length && !mapped.length) {
+        summary.loadError = "no-coordinates";
+        return { records: [], allRecords: normalized, summary, message: internalLoadMessage(internalLoadError("no-coordinates")) };
+      }
+      const message = summary.partial ? "Datos internos cargados parcialmente. Revise el estado de los fragmentos." : "Datos internos cargados.";
+      return { records: mapped, allRecords: normalized, summary, message };
     } catch (error) {
       internalProducerLookup = [];
-      mapDebug("No se pudo cargar la fuente interna.", { message: error?.message || "Error desconocido" });
-      return { records: [], allRecords: [], summary: { rawRows: 0, normalizedRows: 0, coordinateRows: 0 }, message: "No se pudo cargar la fuente interna. Contacte al administrador del dashboard." };
+      const message = internalLoadMessage(error);
+      mapDebug("Carga interna fallida", { code: error?.code || "internal-load", status: error?.status || null, message, manifest: manifestUrl ? debugResourceLabel(manifestUrl) : null });
+      return { records: [], allRecords: [], summary: { rawRows: 0, normalizedRows: 0, coordinateRows: 0, loadError: error?.code || "internal-load" }, message };
     }
   }
 
@@ -531,8 +641,8 @@
     setText("#traceGrain", "Unidad productiva · punto georreferenciado"); setText("#tracePrivacy", "Modo interno autorizado. No publicar identificadores, contactos ni coordenadas sin control de acceso.");
     document.querySelector(".senasa-nav-note")?.replaceChildren(Object.assign(document.createElement("span"), { className: "status-dot" }), document.createTextNode("Modo interno operativo"));
     const modeBadge = document.querySelector(".senasa-public-badge"); if (modeBadge) modeBadge.innerHTML = '<span class="status-dot"></span>Modo interno operativo';
-    const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = source.records?.length ? "<strong>Modo interno operativo</strong> · Datos internos cargados. No publicar sin autenticación ni control de acceso." : "<strong>Modo interno operativo</strong> · No se pudo cargar la fuente interna. Contacte al administrador del dashboard.";
-    const state = { data, filters: readGlobalFilters(), category: "", minStock: 0, includeZeroStock: false, selected: null, selectedProducer: null, clusterSelection: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, map: null, markerLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "" };
+    const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = source.records?.length ? `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "Datos internos cargados.")} No publicar sin autenticación ni control de acceso.` : `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "No se pudo cargar la fuente interna. Contacte al administrador del dashboard.")}`;
+    const state = { data, filters: readGlobalFilters(), category: "", minStock: 0, includeZeroStock: false, selected: null, selectedProducer: null, clusterSelection: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", map: null, markerLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "" };
     activeOperationalState = state;
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     syncOperationalLocationControls(state.records, state.filters, controls);
@@ -836,6 +946,7 @@
     renderOperationalMetrics(rows, state);
     renderOperationalPanel(rows, state);
     renderOperationalFilterChips(state, rows.length);
+    mapDebug("Productores visibles tras filtros", { visible: rows.length });
     setText("#selectionStatus", selectedProducer ? `Unidad seleccionada · ${selectedProducer.displayId}` : `${formatNumber.format(rows.length)} productores georreferenciados visibles · seleccione un punto para ver el detalle.`);
     const warning = $("#internalFilterWarning");
     if (warning) { warning.hidden = !state.speciesWarning; warning.textContent = state.speciesWarning; }
@@ -850,7 +961,7 @@
     const empty = $("#producerMapEmpty");
     if (!empty || !state.map) return;
     if (!state.records.length) {
-      showOperationalEmpty("No se pudo cargar la fuente interna. Contacte al administrador del dashboard.");
+      showOperationalEmpty(state.sourceMessage || "No se pudo cargar la fuente interna. Contacte al administrador del dashboard.");
       return;
     }
     if (!visibleCount) {

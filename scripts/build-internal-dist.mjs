@@ -53,7 +53,10 @@ assertSafeOutput(outputDir);
 const sourceConfig = readFileSync(internalConfigPath, "utf8");
 validateInternalConfig(sourceConfig);
 
-rmSync(outputDir, { recursive: true, force: true });
+// Keep Vercel's local project link and token files across rebuilds. The
+// artifact itself is disposable, but deleting `.vercel` here makes the next
+// `vercel --prod --cwd internal-dist` silently create a different project.
+cleanOutputDirectory();
 mkdirSync(outputDir, { recursive: true });
 
 const copied = [];
@@ -154,6 +157,15 @@ function copyFile(relativeFile) {
   mkdirSync(path.dirname(target), { recursive: true });
   cpSync(source, target);
   copied.push(relativeFile.replaceAll("\\", "/"));
+}
+
+function cleanOutputDirectory() {
+  mkdirSync(outputDir, { recursive: true });
+  const preserved = new Set([".vercel", ".env.local", ".gitignore"]);
+  for (const entry of readdirSync(outputDir, { withFileTypes: true })) {
+    if (preserved.has(entry.name)) continue;
+    rmSync(path.join(outputDir, entry.name), { recursive: true, force: true });
+  }
 }
 
 function copyDirectory(relativeDirectory, include = () => true) {
