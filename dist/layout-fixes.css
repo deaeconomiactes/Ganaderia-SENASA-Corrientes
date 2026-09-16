@@ -25,6 +25,15 @@
 .senasa-footer{margin-left:0 !important}
 .sidebar-toggle{display:flex !important}
 
+/* Resumen territorial interno: filas accionables y lectura numérica estable. */
+.table-panel .table-scroll{max-height:560px}
+.territory-summary-row{cursor:pointer;transition:background-color .16s ease,box-shadow .16s ease}
+.territory-summary-row:hover{background:rgba(32,199,180,.09)}
+.territory-summary-row:focus-visible{outline:2px solid #55cfc0;outline-offset:-2px;background:rgba(32,199,180,.12)}
+.territory-summary-row td{vertical-align:middle}
+.territory-summary-row td:nth-child(-n+3){font-weight:650;color:#e3edf0}
+.territory-summary-empty td{text-align:center;padding:28px 22px;color:#9bb0bd}
+
 .senasa-sidebar-backdrop{
   position:fixed;
   inset:0;

@@ -945,13 +945,13 @@
     renderOperationalMarkers(state);
     renderOperationalMetrics(rows, state);
     renderOperationalPanel(rows, state);
+    renderInternalTerritorialSummary(rows, state);
     renderOperationalFilterChips(state, rows.length);
     mapDebug("Productores visibles tras filtros", { visible: rows.length });
     setText("#selectionStatus", selectedProducer ? `Unidad seleccionada · ${selectedProducer.displayId}` : `${formatNumber.format(rows.length)} productores georreferenciados visibles · seleccione un punto para ver el detalle.`);
     const warning = $("#internalFilterWarning");
     if (warning) { warning.hidden = !state.speciesWarning; warning.textContent = state.speciesWarning; }
     setText("#selectedSummary", `${formatNumber.format(rows.length)} puntos visibles`);
-    setText("#tableSummary", state.records.length ? "La tabla pública conserva el resumen agregado." : "Sin fuente individual georreferenciada.");
     updateOperationalEmptyState(state, rows.length);
     const sourceData = data || state.data || {};
     renderQualitySummary(sourceData, state.filters, filterRows(sourceData.municipios || [], state.filters));
@@ -1164,6 +1164,76 @@
     empty.hidden = false; empty.innerHTML = `<div><h3>${failed ? "No se pudo cargar el mapa" : noVisible ? "Sin productores visibles" : "Modo interno preparado"}</h3><p>${escapeHtml(text)}</p></div>`;
   }
 
+  function setMunicipalityTableHead(mode, speciesKey = "bovinos") {
+    const head = $("#municipalityTableHead");
+    if (!head) return;
+    if (mode === "internal") {
+      const stockLabel = speciesKey === "all" ? "Existencias totales" : `Existencias de ${speciesLabel(speciesKey)}`;
+      head.innerHTML = `<tr><th>Departamento</th><th>Municipio</th><th>Oficina local</th><th class="numeric">Productores visibles</th><th class="numeric">${escapeHtml(stockLabel)}</th><th class="numeric">Promedio por productor</th><th class="numeric">Participación</th></tr>`;
+      return;
+    }
+    head.innerHTML = "<tr><th>Municipio</th><th>Departamento</th><th>Oficina local</th><th>Registros</th><th class=\"numeric\">Bovinos</th><th class=\"numeric\">Bubalinos</th><th class=\"numeric\">Ovinos</th></tr>";
+  }
+
+  function summarizeVisibleTerritory(rows, state) {
+    const selectedSpecies = normalizeSpeciesKey(state.filters?.species) || "bovinos";
+    const useTotal = selectedSpecies === "all";
+    const stockOf = (item) => useTotal ? positiveNumber(item.totalExistencias) : speciesValue(item, selectedSpecies);
+    const groups = new Map();
+    (rows || []).forEach((item) => {
+      const departamento = item.departamento || "Sin departamento";
+      const municipio = item.municipio || "Sin municipio";
+      const oficina = item.oficinaLocal || "Sin oficina local";
+      const key = `${departamento}\u001f${municipio}\u001f${oficina}`;
+      if (!groups.has(key)) groups.set(key, { departamento, municipio, oficina, producers: 0, stock: 0, items: [] });
+      const group = groups.get(key);
+      group.producers += 1;
+      group.stock += stockOf(item);
+      group.items.push(item);
+    });
+    return { selectedSpecies, totalStock: (rows || []).reduce((total, item) => total + stockOf(item), 0), groups: [...groups.values()].sort((a, b) => b.stock - a.stock || b.producers - a.producers || a.departamento.localeCompare(b.departamento, "es")) };
+  }
+
+  function renderInternalTerritorialSummary(rows, state) {
+    const target = $("#municipalityRows");
+    if (!target) return;
+    const summary = summarizeVisibleTerritory(rows, state);
+    const groups = summary.groups;
+    state.territorialSummaryGroups = groups;
+    setMunicipalityTableHead("internal", summary.selectedSpecies);
+    if (!groups.length) {
+      target.innerHTML = '<tr class="territory-summary-empty"><td colspan="7">No hay productores visibles para los filtros seleccionados.</td></tr>';
+      setText("#tableSummary", "Sin productores visibles · Según filtros activos");
+      return;
+    }
+    target.innerHTML = groups.map((group, index) => {
+      const share = summary.totalStock > 0 ? group.stock / summary.totalStock * 100 : 0;
+      const average = group.producers ? group.stock / group.producers : 0;
+      const accessibleLabel = `${group.departamento}, ${group.municipio}, ${group.oficina}: ${formatNumber.format(group.producers)} productores visibles`;
+      return `<tr class="territory-summary-row" data-territory-index="${index}" tabindex="0" role="button" aria-label="${escapeHtml(accessibleLabel)}"><td>${escapeHtml(titleCase(group.departamento))}</td><td>${escapeHtml(titleCase(group.municipio))}</td><td>${escapeHtml(titleCase(group.oficina))}</td><td class="numeric">${formatNumber.format(group.producers)}</td><td class="numeric">${formatNumber.format(group.stock)}</td><td class="numeric">${formatDecimal.format(average)}</td><td class="numeric">${formatDecimal.format(share)}%</td></tr>`;
+    }).join("");
+    setText("#tableSummary", `${formatNumber.format(groups.length)} agrupaciones · ${formatNumber.format(rows.length)} productores · Según filtros activos`);
+    target.querySelectorAll(".territory-summary-row").forEach((row) => {
+      const activate = () => focusTerritorySummaryGroup(Number(row.dataset.territoryIndex), state);
+      row.addEventListener("click", activate);
+      row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } });
+    });
+  }
+
+  function focusTerritorySummaryGroup(index, state) {
+    const group = state.territorialSummaryGroups?.[index];
+    if (!group) return;
+    state.filters.department = group.departamento === "Sin departamento" ? "all" : group.departamento;
+    state.filters.municipality = group.municipio === "Sin municipio" ? "" : group.municipio;
+    state.filters.office = group.oficina === "Sin oficina local" ? "" : group.oficina;
+    clearOperationalSelection(state);
+    const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
+    syncOperationalLocationControls(state.records, state.filters, controls);
+    saveGlobalFilters(state.filters);
+    renderOperationalTerritory(state.data, state);
+    if (state.visible?.length && state.map) state.map.fitBounds(L.latLngBounds(state.visible.map((item) => [item.lat, item.lon])), { padding: [34, 34], maxZoom: 12, animate: true });
+  }
+
   function renderTerritory(data, state) {
     const grids = filterGrids(data.grillas, state.filters);
     const municipalities = filterRows(data.municipios, state.filters);
@@ -1348,6 +1418,7 @@
   }
 
   function renderMunicipalities(items) {
+    setMunicipalityTableHead("public");
     $("#municipalityRows").innerHTML = [...items].sort((a, b) => b.bovinos - a.bovinos).slice(0, 35).map((item) => `<tr><td>${escapeHtml(titleCase(item.nombre))}</td><td>${escapeHtml(titleCase(item.departamento))}</td><td>${escapeHtml(titleCase(item.oficina))}</td><td>${formatNumber.format(item.registros)}</td><td class="numeric">${formatNumber.format(item.bovinos)}</td><td class="numeric">${formatNumber.format(item.bubalinos)}</td><td class="numeric">${formatNumber.format(item.ovinos)}</td></tr>`).join("") || '<tr><td colspan="7">No hay datos para los filtros seleccionados.</td></tr>';
   }
 
