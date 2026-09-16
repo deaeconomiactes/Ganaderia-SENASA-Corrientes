@@ -506,7 +506,7 @@
         summary.loadError = "no-coordinates";
         return { records: [], allRecords: normalized, summary, message: internalLoadMessage(internalLoadError("no-coordinates")) };
       }
-      const message = summary.partial ? "Datos internos cargados parcialmente. Revise el estado de los fragmentos." : "Datos internos cargados.";
+      const message = summary.partial ? `Datos internos cargados parcialmente (${summary.chunksLoaded}/${summary.chunksTotal} fragmentos). Revise el estado de los fragmentos.` : "Datos internos cargados.";
       return { records: mapped, allRecords: normalized, summary, message };
     } catch (error) {
       internalProducerLookup = [];
