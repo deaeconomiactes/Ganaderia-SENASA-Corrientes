@@ -83,10 +83,36 @@ for (const optionalDirectory of ["assets", "css", "js"]) {
 if (dataUrl) {
   console.log("Fuente de productores: endpoint interno (no se copia JSON individual).");
 } else {
-  const internalDataTarget = path.join(outputDir, "data", "interno", "productores.json");
-  mkdirSync(path.dirname(internalDataTarget), { recursive: true });
-  cpSync(producerData, internalDataTarget);
-  copied.push(toRelative(internalDataTarget));
+  const internalDataDir = path.join(outputDir, "data", "interno");
+  mkdirSync(internalDataDir, { recursive: true });
+  const sourcePayload = JSON.parse(readFileSync(producerData, "utf8"));
+  const records = Array.isArray(sourcePayload) ? sourcePayload : sourcePayload?.records;
+  if (!Array.isArray(records)) throw new Error("La fuente interna debe contener un array de registros.");
+  const maxChunkBytes = 5_000_000;
+  const chunks = [];
+  let current = [];
+  let currentBytes = 2;
+  for (const record of records) {
+    const serialized = JSON.stringify(record);
+    const recordBytes = Buffer.byteLength(serialized, "utf8") + (current.length ? 1 : 0);
+    if (current.length && currentBytes + recordBytes > maxChunkBytes) {
+      const name = `productores-${String(chunks.length).padStart(4, "0")}.json`;
+      writeFileSync(path.join(internalDataDir, name), JSON.stringify(current), "utf8");
+      copied.push(toRelative(path.join(internalDataDir, name)));
+      chunks.push({ url: `./data/interno/${name}`, records: current.length });
+      current = [];
+      currentBytes = 2;
+    }
+    current.push(record);
+    currentBytes += recordBytes;
+  }
+  const name = `productores-${String(chunks.length).padStart(4, "0")}.json`;
+  writeFileSync(path.join(internalDataDir, name), JSON.stringify(current), "utf8");
+  copied.push(toRelative(path.join(internalDataDir, name)));
+  chunks.push({ url: `./data/interno/${name}`, records: current.length });
+  const manifestPath = path.join(internalDataDir, "productores.manifest.json");
+  writeFileSync(manifestPath, JSON.stringify({ format: "senasa-producers-chunks-v1", records: records.length, report: sourcePayload?.report || sourcePayload?._report || null, chunks }), "utf8");
+  copied.push(toRelative(manifestPath));
 
   if (existsSync(reportCandidate)) {
     const reportTarget = path.join(outputDir, "data", "interno", "reporte_productores.json");
@@ -175,7 +201,7 @@ function validateInternalConfig(contents) {
 function verifyOutput() {
   assertFile(path.join(outputDir, "index.html"), "internal-dist/index.html");
   assertFile(path.join(outputDir, "config.js"), "internal-dist/config.js");
-  if (!dataUrl) assertFile(path.join(outputDir, "data", "interno", "productores.json"), "internal-dist/data/interno/productores.json");
+  if (!dataUrl) assertFile(path.join(outputDir, "data", "interno", "productores.manifest.json"), "internal-dist/data/interno/productores.manifest.json");
   const generatedConfig = readFileSync(path.join(outputDir, "config.js"), "utf8");
   validateInternalConfig(generatedConfig);
 }

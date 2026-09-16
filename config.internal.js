@@ -13,7 +13,7 @@ window.APP_CONFIG = {
   SHOW_PRODUCER_POINTS: true,
   ENABLE_PRODUCER_DETAIL: true,
   ENABLE_SECURE_LOCATOR: true,
-  INTERNAL_PRODUCER_DATA_URL: "./data/interno/productores.json",
+  INTERNAL_PRODUCER_DATA_URL: "./data/interno/productores.manifest.json",
   INTERNAL_PRODUCER_REPORT_URL: "./data/interno/reporte_productores.json",
   INTERNAL_MAX_MARKERS: 300,
   DEBUG_MAP: false,

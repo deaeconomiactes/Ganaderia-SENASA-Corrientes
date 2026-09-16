@@ -30,11 +30,12 @@ internal-dist/
   vendor/leaflet/
   data/senasa-corrientes.json
   data/metadata.json
-  data/interno/productores.json
+  data/interno/productores.manifest.json
+  data/interno/productores-0000.json ... productores-0013.json
   data/interno/reporte_productores.json
 ```
 
-El generador copia sólo los datos públicos agregados y los dos archivos internos explícitamente autorizados. No modifica `dist/config.js`, no cambia GitHub Pages y no lee ni muestra filas individuales en consola.
+El generador copia sólo los datos públicos agregados y los archivos internos explícitamente autorizados. Para respetar el límite de archivos de algunos hostings, divide los productores en fragmentos JSON de aproximadamente 5 MB y crea `productores.manifest.json`. El frontend descarga el manifiesto y recompone los fragmentos en memoria; la interfaz no cambia y no se imprimen filas individuales en consola. No modifica `dist/config.js` ni cambia GitHub Pages.
 
 Si los productores viven en una API interna, se puede evitar copiar el JSON y configurar la URL en el artefacto:
 
@@ -112,7 +113,7 @@ Si la fuente no está disponible, el sitio muestra un estado vacío explicativo;
 ### Artefacto interno
 
 - Confirmar que existe `internal-dist/config.js` y contiene `APP_MODE: "internal"`, `PUBLIC_SAFE_MODE: false`, `SHOW_PRODUCER_POINTS: true` e `INTERNAL_PRODUCER_DATA_URL` apuntando al origen correcto.
-- Confirmar que `internal-dist/data/interno/productores.json` existe sólo en la máquina o hosting protegido.
+- Confirmar que `internal-dist/data/interno/productores.manifest.json` y sus fragmentos `productores-*.json` existen sólo en la máquina o hosting protegido.
 - Abrir el enlace en una ventana sin sesión y comprobar que la protección bloquea `index.html` y la carpeta `data/interno/`.
 - Probar filtros, clusters, selección de punto, ranking y cierre de ficha sin exponer identificadores completos.
 - Revisar `reporte_productores.json` y resolver advertencias críticas antes de desplegar.

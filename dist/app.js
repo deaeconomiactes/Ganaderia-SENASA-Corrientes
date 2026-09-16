@@ -352,7 +352,15 @@
     try {
       const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = await response.json();
+      let payload = await response.json();
+      if (payload?.format === "senasa-producers-chunks-v1" && Array.isArray(payload.chunks)) {
+        const chunkPayloads = await Promise.all(payload.chunks.map(async (chunk) => {
+          const chunkResponse = await fetch(new URL(chunk.url, response.url), { cache: "no-store" });
+          if (!chunkResponse.ok) throw new Error(`HTTP ${chunkResponse.status} al leer un fragmento de la fuente interna.`);
+          return chunkResponse.json();
+        }));
+        payload = { records: chunkPayloads.flat(), report: payload.report || undefined };
+      }
       missingRenspaKeyWarningShown = false;
       const normalized = normalizeProducerData(payload);
       // The localizer only returns points that can be safely located on the
