@@ -15,6 +15,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { projectRoot } from "./sites-env.mjs";
 
@@ -73,7 +74,7 @@ const requiredFiles = [
 ];
 for (const relativeFile of requiredFiles) copyFile(relativeFile);
 
-for (const optionalFile of [".nojekyll", "favicon.ico", "robots.txt"]) {
+for (const optionalFile of [".nojekyll", "favicon.ico", "favicon.svg", "robots.txt"]) {
   if (existsSync(path.join(sourceDist, optionalFile))) copyFile(optionalFile);
 }
 
@@ -91,31 +92,32 @@ if (dataUrl) {
   const sourcePayload = JSON.parse(readFileSync(producerData, "utf8"));
   const records = Array.isArray(sourcePayload) ? sourcePayload : sourcePayload?.records;
   if (!Array.isArray(records)) throw new Error("La fuente interna debe contener un array de registros.");
-  const maxChunkBytes = 5_000_000;
-  const chunks = [];
-  let current = [];
-  let currentBytes = 2;
-  for (const record of records) {
-    const serialized = JSON.stringify(record);
-    const recordBytes = Buffer.byteLength(serialized, "utf8") + (current.length ? 1 : 0);
-    if (current.length && currentBytes + recordBytes > maxChunkBytes) {
-      const name = `productores-${String(chunks.length).padStart(4, "0")}.json`;
-      writeFileSync(path.join(internalDataDir, name), JSON.stringify(current), "utf8");
-      copied.push(toRelative(path.join(internalDataDir, name)));
-      chunks.push({ url: `./data/interno/${name}`, records: current.length });
-      current = [];
-      currentBytes = 2;
-    }
-    current.push(record);
-    currentBytes += recordBytes;
-  }
-  const name = `productores-${String(chunks.length).padStart(4, "0")}.json`;
-  writeFileSync(path.join(internalDataDir, name), JSON.stringify(current), "utf8");
-  copied.push(toRelative(path.join(internalDataDir, name)));
-  chunks.push({ url: `./data/interno/${name}`, records: current.length });
-  const manifestPath = path.join(internalDataDir, "productores.manifest.json");
-  writeFileSync(manifestPath, JSON.stringify({ format: "senasa-producers-chunks-v1", records: records.length, report: sourcePayload?.report || sourcePayload?._report || null, chunks }), "utf8");
-  copied.push(toRelative(manifestPath));
+  const detailChunks = writeRecordChunks({
+    records: records.map(toProducerDetail),
+    prefix: "productores-detail",
+    maxChunkBytes: 4_000_000,
+    internalDataDir,
+  });
+  const detailChunkById = new Map();
+  detailChunks.forEach((chunk, chunkIndex) => chunk.ids.forEach((id) => detailChunkById.set(id, chunkIndex)));
+  const indexRecords = records.map((record) => toProducerIndex(record, detailChunkById.get(record.id)));
+  const indexChunks = writeRecordChunks({ records: indexRecords, prefix: "productores-index", maxChunkBytes: 2_000_000, internalDataDir });
+  const publicChunkMeta = (chunks) => chunks.map(({ url, records: count, bytes }) => ({ url, records: count, bytes }));
+  const detailManifestPath = path.join(internalDataDir, "productores.detail.manifest.json");
+  writeJson(detailManifestPath, { format: "senasa-producers-detail-v2", records: records.length, chunks: publicChunkMeta(detailChunks) });
+  const searchIndexPath = path.join(internalDataDir, "search-index.json");
+  writeJson(searchIndexPath, buildSearchIndex(records, detailChunkById));
+  const indexManifestPath = path.join(internalDataDir, "productores.index.manifest.json");
+  writeJson(indexManifestPath, {
+    format: "senasa-producers-index-v2",
+    records: records.length,
+    report: sourcePayload?.report || sourcePayload?._report || null,
+    detailManifest: "./data/interno/productores.detail.manifest.json",
+    detailChunks: detailChunks.map((chunk) => chunk.url),
+    species: ["bovinos", "bubalinos", "ovinos", "caprinos", "porcinos", "equinos"],
+    searchIndex: "./data/interno/search-index.json",
+    chunks: publicChunkMeta(indexChunks),
+  });
 
   if (existsSync(reportCandidate)) {
     const reportTarget = path.join(outputDir, "data", "interno", "reporte_productores.json");
@@ -131,6 +133,16 @@ if (dataUrl) config = replaceConfigValue(config, "INTERNAL_PRODUCER_DATA_URL", d
 if (locatorEndpoint) config = replaceConfigValue(config, "SECURE_LOCATOR_ENDPOINT", locatorEndpoint);
 writeFileSync(path.join(outputDir, "config.js"), config, "utf8");
 copied.push("config.js");
+
+writeJson(path.join(outputDir, "vercel.json"), {
+  headers: [
+    { source: "/config.js", headers: [{ key: "Cache-Control", value: "private, no-cache, no-store, must-revalidate" }] },
+    { source: "/data/interno/(.*manifest|search-index).json", headers: [{ key: "Cache-Control", value: "private, no-cache, no-store, must-revalidate" }] },
+    { source: "/data/interno/(productores-index|productores-detail)-(.*).json", headers: [{ key: "Cache-Control", value: "private, max-age=86400, immutable" }] },
+    { source: "/data/interno/(.*)", headers: [{ key: "X-Content-Type-Options", value: "nosniff" }, { key: "Referrer-Policy", value: "no-referrer" }] },
+    { source: "/app.js", headers: [{ key: "Cache-Control", value: "private, max-age=0, must-revalidate" }] },
+  ],
+});
 
 writeFileSync(
   path.join(outputDir, "INTERNAL_BUILD.txt"),
@@ -213,9 +225,94 @@ function validateInternalConfig(contents) {
 function verifyOutput() {
   assertFile(path.join(outputDir, "index.html"), "internal-dist/index.html");
   assertFile(path.join(outputDir, "config.js"), "internal-dist/config.js");
-  if (!dataUrl) assertFile(path.join(outputDir, "data", "interno", "productores.manifest.json"), "internal-dist/data/interno/productores.manifest.json");
+  if (!dataUrl) {
+    assertFile(path.join(outputDir, "data", "interno", "productores.index.manifest.json"), "internal-dist/data/interno/productores.index.manifest.json");
+    assertFile(path.join(outputDir, "data", "interno", "productores.detail.manifest.json"), "internal-dist/data/interno/productores.detail.manifest.json");
+    assertFile(path.join(outputDir, "data", "interno", "search-index.json"), "internal-dist/data/interno/search-index.json");
+  }
   const generatedConfig = readFileSync(path.join(outputDir, "config.js"), "utf8");
   validateInternalConfig(generatedConfig);
+}
+
+function toProducerIndex(record, detailChunkIndex) {
+  return {
+    i: record.id,
+    d: record.displayId,
+    r: record.renspaMasked || "",
+    a: roundCoordinate(record.lat),
+    o: roundCoordinate(record.lon),
+    p: record.departamento || "",
+    m: record.municipio || "",
+    f: record.oficinaLocal || "",
+    t: Number(record.totalExistencias || 0),
+    e: ["bovinos", "bubalinos", "ovinos", "caprinos", "porcinos", "equinos"].map((key) => Number(record.especies?.[key] || 0)),
+    c: Object.entries(record.categorias || {}).filter(([, value]) => Number(value) > 0).map(([key]) => key),
+    x: detailChunkIndex,
+  };
+}
+
+function toProducerDetail(record) {
+  return {
+    id: record.id,
+    paraje: record.paraje || "",
+    categorias: compactPositiveObject(record.categorias),
+  };
+}
+
+function buildSearchIndex(records) {
+  const indexes = { renspa: {}, dni: {}, cuit_cuil: {}, internal_id: {} };
+  for (const record of records) {
+    for (const [type, rawValue] of Object.entries(record.searchKeys || {})) {
+      if (!indexes[type] || !rawValue) continue;
+      const value = String(rawValue);
+      const entry = record.id;
+      const existing = indexes[type][value];
+      indexes[type][value] = existing ? (Array.isArray(existing) ? [...existing, entry] : [existing, entry]) : entry;
+    }
+    const internal = String(record.id || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (internal && !indexes.internal_id[internal]) indexes.internal_id[internal] = record.id;
+  }
+  return { format: "senasa-search-index-v1", records: records.length, indexes };
+}
+
+function writeRecordChunks({ records, prefix, maxChunkBytes, internalDataDir }) {
+  const groups = [];
+  let current = [];
+  let currentBytes = 2;
+  const flush = () => {
+    if (!current.length) return;
+    const json = JSON.stringify(current);
+    const hash = createHash("sha256").update(json).digest("hex").slice(0, 10);
+    const name = `${prefix}-${String(groups.length).padStart(4, "0")}-${hash}.json`;
+    const target = path.join(internalDataDir, name);
+    writeFileSync(target, json, "utf8");
+    copied.push(toRelative(target));
+    groups.push({ url: `./data/interno/${name}`, records: current.length, bytes: Buffer.byteLength(json, "utf8"), ids: current.map((record) => record.id) });
+    current = [];
+    currentBytes = 2;
+  };
+  for (const record of records) {
+    const bytes = Buffer.byteLength(JSON.stringify(record), "utf8") + (current.length ? 1 : 0);
+    if (current.length && currentBytes + bytes > maxChunkBytes) flush();
+    current.push(record);
+    currentBytes += bytes;
+  }
+  flush();
+  return groups;
+}
+
+function writeJson(target, value) {
+  writeFileSync(target, JSON.stringify(value), "utf8");
+  copied.push(toRelative(target));
+}
+
+function compactPositiveObject(value) {
+  return Object.fromEntries(Object.entries(value || {}).filter(([, current]) => Number(current) > 0));
+}
+
+function roundCoordinate(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Number(number.toFixed(5)) : null;
 }
 
 function resolveFromProject(value) {
@@ -237,6 +334,13 @@ function assertSafeOutput(target) {
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("La carpeta de salida debe estar dentro del proyecto y no puede ser la raíz del proyecto.");
   }
+  const overlaps = (left, right) => {
+    const fromLeft = path.relative(left, right);
+    const fromRight = path.relative(right, left);
+    return !fromLeft || !fromRight || (!fromLeft.startsWith("..") && !path.isAbsolute(fromLeft)) || (!fromRight.startsWith("..") && !path.isAbsolute(fromRight));
+  };
+  if (overlaps(target, sourceDist)) throw new Error("La carpeta de salida no puede ser dist ni solaparse con el dist de origen.");
+  if (path.resolve(target) === path.resolve(producerData) || path.resolve(target) === path.resolve(reportCandidate)) throw new Error("La carpeta de salida no puede coincidir con un archivo de datos de entrada.");
 }
 
 function toRelative(filePath) {

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0e1824" />
     <meta name="description" content="Panel territorial de existencias ganaderas de Corrientes." />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <title>Territorio · SENASA Ganadería Corrientes</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -130,8 +131,10 @@
     <footer class="footer senasa-footer"><span>Datos agregados para consulta ejecutiva · SIN datos personales ni ubicaciones exactas.</span><span>Interfaz basada en <a href="https://github.com/colorlibhq/gentelella" target="_blank" rel="noopener">Gentelella v4</a> · MIT</span></footer>
     <dialog id="infoDialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">NOTA METODOLÓGICA</p><h2>Datos territoriales para gestión</h2><p id="sourceInfo">—</p><p>Esta vista no incluye datos personales, contactos, identificadores ni ubicación exacta de predios. Los indicadores económicos se encuentran en la vista de Análisis y requieren supuestos explícitos.</p></dialog>
     <dialog id="locatorDialog" class="renspa-dialog"><button class="dialog-close" aria-label="Cerrar">×</button><p class="eyebrow">LOCALIZADOR PROTEGIDO</p><h2 id="locatorDialogTitle">Consulta protegida</h2><p id="locatorStatus">La búsqueda por identificador requiere un servicio seguro autenticado. Esta versión pública sólo permite análisis agregado.</p><div id="locatorResult" class="locator-result" aria-live="polite"></div><p class="dialog-note">No se muestran ni almacenan identificadores, productores, domicilios, coordenadas exactas o existencias individuales.</p></dialog>
+    <script>performance.mark("senasa-config-start")</script>
     <script src="./config.js"></script>
+    <script>performance.mark("senasa-config-end")</script>
     <script src="./vendor/leaflet/leaflet.js"></script>
-    <script src="./app.js?v=20260916-loader2"></script>
+    <script src="./app.js?v=20260918-perf1"></script>
   </body>
 </html>

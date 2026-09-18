@@ -96,7 +96,7 @@ Todas las rutas del sitio son relativas (`./data`, `./config.js`, `./app.js`), p
 ## Despliegue interno protegido
 
 1. Generar `productores.json` y `reporte_productores.json` en una máquina administrativa con `node scripts/build-producer-data.mjs "./data/interno/base_original.xlsx"`.
-2. Ejecutar `node scripts/build-internal-dist.mjs` (o `npm run build:internal`) para crear `internal-dist/`. La carpeta contiene `config.js` interno, la aplicación, Leaflet y los datos individuales divididos en un manifest y fragmentos JSON; está excluida de Git.
+2. Ejecutar `node scripts/build-internal-dist.mjs` (o `npm run build:internal`) para crear `internal-dist/`. La carpeta contiene `config.js` interno, la aplicación, Leaflet, un índice liviano fragmentado para mapa/filtros, detalle fragmentado bajo demanda y un índice protegido de búsqueda; está excluida de Git.
 3. Publicar **sólo `internal-dist/`** en Vercel, Netlify o un servidor institucional con autenticación/RBAC. Las instrucciones completas de protección están en [`DEPLOY_INTERNAL.md`](./DEPLOY_INTERNAL.md).
 4. Si se usa una API, pasar `--data-url` y `--locator-endpoint` al generador. Nunca subir el XLSX original, el JSON interno ni `internal-dist/` al repositorio público.
 

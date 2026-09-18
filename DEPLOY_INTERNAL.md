@@ -5,7 +5,7 @@ Este documento describe el flujo recomendado para entregar el mapa operativo a u
 ## Separación público / interno
 
 - **GitHub Pages (público):** sirve `dist/` con `config.public.js`. Es una vista agregada, sin productores individuales y sin resolución de RENSPA/DNI/CUIT/CUIL.
-- **Hosting interno protegido:** sirve `internal-dist/`, generado localmente. Contiene `config.js` en modo interno y el manifest más los fragmentos `data/interno/productores-*.json`, por lo que sólo debe quedar detrás de autenticación, VPN/intranet o un proxy institucional.
+- **Hosting interno protegido:** sirve `internal-dist/`, generado localmente. Contiene `config.js`, índice cartográfico, detalle diferido e índice de búsqueda; sólo debe quedar detrás de autenticación, VPN/intranet o un proxy institucional.
 
 `internal-dist/`, `data/interno/` y los archivos individuales están excluidos por `.gitignore`. No se debe forzar su inclusión en el repositorio público.
 
@@ -30,12 +30,15 @@ internal-dist/
   vendor/leaflet/
   data/senasa-corrientes.json
   data/metadata.json
-  data/interno/productores.manifest.json
-  data/interno/productores-0000.json ... productores-0013.json
+  data/interno/productores.index.manifest.json
+  data/interno/productores-index-0000-<hash>.json ...
+  data/interno/productores.detail.manifest.json
+  data/interno/productores-detail-0000-<hash>.json ...
+  data/interno/search-index.json
   data/interno/reporte_productores.json
 ```
 
-El generador copia sólo los datos públicos agregados y los archivos internos explícitamente autorizados. Para respetar el límite de archivos de algunos hostings, divide los productores en fragmentos JSON de aproximadamente 5 MB y crea `productores.manifest.json`. El frontend descarga el manifiesto y recompone los fragmentos en memoria; la interfaz no cambia y no se imprimen filas individuales en consola. No modifica `dist/config.js` ni cambia GitHub Pages.
+El generador copia sólo los datos públicos agregados y los archivos internos explícitamente autorizados. El frontend descarga al inicio únicamente los fragmentos livianos del índice; cada detalle se solicita al seleccionar un productor y se conserva en caché de sesión por fragmento. Los nombres incluyen un hash para permitir caché acotada sin servir datos de una compilación anterior. El índice de búsqueda sólo existe en este artefacto protegido y nunca se imprime en consola. No modifica `dist/config.js` ni cambia GitHub Pages.
 
 Si los productores viven en una API interna, se puede evitar copiar el JSON y configurar la URL en el artefacto:
 
@@ -74,7 +77,7 @@ node scripts/build-config.mjs public
 
    `build-internal-dist.mjs` conserva `.vercel/` y `.env.local` dentro de la carpeta ignorada para que las reconstrucciones futuras sigan apuntando al mismo proyecto.
 
-4. En **Settings → Deployment Protection**, activar **Vercel Authentication** con alcance **All Deployments** (incluye Production) y autorizar al equipo/correos correspondientes. Verificar que una ventana sin sesión no pueda abrir `index.html`, el manifest ni ningún `data/interno/productores-*.json`.
+4. En **Settings → Deployment Protection**, activar **Vercel Authentication** con alcance **All Deployments** (incluye Production) y autorizar al equipo/correos correspondientes. Verificar que una ventana sin sesión no pueda abrir `index.html`, ninguno de los manifests, `search-index.json` ni ningún fragmento `data/interno/productores-*.json`.
 5. Compartir al jefe sólo el dominio protegido. No compartir tokens de despliegue ni el directorio local.
 
 Cuando el proveedor no ofrece autenticación suficiente para el nivel de sensibilidad requerido, usar Vercel detrás de SSO, VPN o un proxy institucional; no convertir el enlace en público.
@@ -115,7 +118,7 @@ Si la fuente no está disponible, el sitio muestra un estado vacío explicativo;
 ### Artefacto interno
 
 - Confirmar que existe `internal-dist/config.js` y contiene `APP_MODE: "internal"`, `PUBLIC_SAFE_MODE: false`, `SHOW_PRODUCER_POINTS: true` e `INTERNAL_PRODUCER_DATA_URL` apuntando al origen correcto.
-- Confirmar que `internal-dist/data/interno/productores.manifest.json` y sus fragmentos `productores-*.json` existen sólo en la máquina o hosting protegido.
+- Confirmar que los manifests `productores.index.manifest.json` y `productores.detail.manifest.json`, `search-index.json` y sus fragmentos existen sólo en la máquina o hosting protegido.
 - Abrir el enlace en una ventana sin sesión y comprobar que la protección bloquea `index.html` y la carpeta `data/interno/`.
 - Probar filtros, clusters, selección de punto, ranking y cierre de ficha sin exponer identificadores completos.
 - Revisar `reporte_productores.json` y resolver advertencias críticas antes de desplegar.

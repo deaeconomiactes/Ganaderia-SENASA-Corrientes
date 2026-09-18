@@ -33,6 +33,10 @@ jobs:
           grep -q 'INTERNAL_PRODUCER_DATA_URL: null' dist/config.js
           test ! -e dist/data/interno/productores.json
           test ! -e dist/data/interno/reporte_productores.json
+          if find dist/data/interno -type f ! -name 'README.md' ! -name 'productores.example.json' | grep -q .; then
+            echo 'Se detectó un archivo interno no autorizado en el artefacto público.'
+            exit 1
+          fi
           if find dist/data/interno -type f \( -name '*.xlsx' -o -name '*.csv' -o -name '*.parquet' \) | grep -q .; then
             echo 'Se detectó una fuente interna en el artefacto público.'
             exit 1
