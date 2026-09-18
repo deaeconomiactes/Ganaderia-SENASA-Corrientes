@@ -718,7 +718,7 @@
     $("#mapLevelControl").hidden = true;
     const advanced = $("#producerAdvancedFilters");
     if (advanced) { advanced.hidden = false; advanced.open = false; }
-    $("#producerCategoryControl").hidden = false; $("#producerMinStockControl").hidden = false; $("#producerMaxStockControl").hidden = false; $("#includeZeroStockControl").hidden = false;
+    $("#producerCategoryControl").hidden = false; $("#producerRangeControl").hidden = false; $("#producerMinStockControl").hidden = false; $("#producerMaxStockControl").hidden = false; $("#includeZeroStockControl").hidden = false;
     ["#drawAreaButton", "#finishAreaButton", "#clearAreaButton"].forEach((selector) => { const button = $(selector); if (button) button.hidden = true; });
     const clearFiltersButton = $("#clearOperationalFiltersButton"); if (clearFiltersButton) clearFiltersButton.hidden = false;
     setText("#metricRecordsLabel", "UNIDADES PRODUCTIVAS"); setText("#metricMapUnitLabel", "PRODUCTORES GEOREFERENCIADOS"); setText("#metricMapUnitNote", "Uso interno · según filtros");
