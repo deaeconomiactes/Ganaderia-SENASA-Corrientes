@@ -54,6 +54,15 @@ const report = {
   duplicateSourceIdentifierRows: 0,
   missingIdentifierRows: 0,
   missingAdministrativeRows: 0,
+  identifierCoverage: Object.fromEntries(
+    ["renspa", "dni", "cuit", "cuil", "document", "cuit_cuil", "internal_id"].map((type) => [type, {
+      sourceRows: 0,
+      validRows: 0,
+      outputRows: 0,
+      distinctValues: 0,
+      duplicateRows: 0,
+    }]),
+  ),
   departments: {},
   recognizedFields: summarizeFields(fields),
   unrecognizedFields: headers.filter((header) => !fields.recognized.has(canonical(header))),
@@ -62,10 +71,13 @@ const report = {
 };
 
 const seenIdentifiers = new Set();
+const seenSearchKeys = Object.fromEntries(Object.keys(report.identifierCoverage).map((type) => [type, new Set()]));
 const records = [];
 rows.forEach((row, index) => {
   const sourceIdentifier = cleanValue(valueAt(row, fields.idOrRenspa));
   const renspa = cleanValue(valueAt(row, fields.renspa));
+  const searchKeys = buildSearchKeys(row, fields, { renspa, sourceIdentifier });
+  updateIdentifierCoverage(report.identifierCoverage, searchKeys, seenSearchKeys, false);
   if (sourceIdentifier && seenIdentifiers.has(sourceIdentifier)) report.duplicateSourceIdentifierRows += 1;
   if (sourceIdentifier) seenIdentifiers.add(sourceIdentifier);
   const lat = parseCoordinate(valueAt(row, fields.lat), "lat");
@@ -89,12 +101,7 @@ rows.forEach((row, index) => {
   report.validProducers += 1;
   report.departments[departamento] = (report.departments[departamento] || 0) + 1;
   const sequence = String(index + 1).padStart(6, "0");
-  const searchKeys = Object.fromEntries(Object.entries({
-      renspa: normalizeIdentifier(renspa),
-      dni: normalizeIdentifier(cleanValue(valueAt(row, fields.dni))),
-      cuit_cuil: normalizeIdentifier(cleanValue(valueAt(row, fields.cuitCuil))),
-      internal_id: normalizeIdentifier(sourceIdentifier),
-    }).filter(([, value]) => value));
+  updateIdentifierCoverage(report.identifierCoverage, searchKeys, seenSearchKeys, true);
   records.push({
     id: `UP-${sequence}`,
     displayId: renspa ? `RENSPA ${maskIdentifier(renspa)}` : `Unidad operativa ${sequence}`,
@@ -108,6 +115,8 @@ rows.forEach((row, index) => {
     categorias: values.categorias,
   });
 });
+
+for (const [type, values] of Object.entries(seenSearchKeys)) report.identifierCoverage[type].distinctValues = values.size;
 
 if (!records.length) report.warnings.push("No se generaron productores válidos con coordenadas, ubicación administrativa e identificador.");
 if (report.withoutCoordinates) report.warnings.push(`${report.withoutCoordinates} filas quedaron fuera por coordenadas inválidas o ausentes.`);
@@ -166,16 +175,47 @@ function detectFields(headers) {
   const speciesAliases = { bovinos: ["bovinos", "bovino", "bov"], bubalinos: ["bubalinos", "bubalino", "bufalos", "bufalo"], ovinos: ["ovinos", "ovino", "ovejas"], caprinos: ["caprinos", "caprino", "cabras"], porcinos: ["porcinos", "porcino", "cerdos"], equinos: ["equinos", "equino", "caballos"] };
   const id = find(["idproductor", "productorid", "idunidad", "unidadid", "idregistro", "registroid", "codigooperativo", "codigo", "id"]);
   const renspa = find(["renspa", "renspanro", "renspanumero", "uprenspa"]);
-  const dni = find(["dni", "documento", "documentonro", "documentonumero"]);
-  const cuitCuil = find(["cuit", "cuil", "cuitcuil", "cuitcuilnro"]);
-  const recognized = new Set([id, renspa, dni, cuitCuil].filter(Boolean).map(canonical));
+  const dni = find(["dni", "nrodni", "dninro", "numerodni", "documentoidentidad"]);
+  const cuit = find(["cuit", "nrocuit", "cuitnro", "numerocuit"]);
+  const cuil = find(["cuil", "nrocuil", "cuilnro", "numerocuil"]);
+  const cuitCuil = find(["cuitcuil", "cuitocuil", "cuitcuilnro", "nrocuitcuil", "numerocuitcuil"]);
+  const document = find(["documento", "documentonro", "documentonumero", "nrodocumento", "numerodocumento", "nrodoc", "numdoc"]);
+  const recognized = new Set([id, renspa, dni, cuit, cuil, cuitCuil, document].filter(Boolean).map(canonical));
   const species = Object.fromEntries(Object.entries(speciesAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
   const categories = Object.fromEntries(Object.entries(CATEGORY_ALIASES).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
-  const fields = { idOrRenspa: id || renspa, id, renspa, dni, cuitCuil, departamento: find(["departamento", "depto", "dep"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
+  const fields = { idOrRenspa: id || renspa, id, renspa, dni, cuit, cuil, cuitCuil, document, departamento: find(["departamento", "depto", "dep"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
   [fields.departamento, fields.municipio, fields.oficina, fields.paraje, fields.lat, fields.lon, ...Object.values(species), ...Object.values(categories)].filter(Boolean).forEach((field) => recognized.add(canonical(field)));
   return fields;
 }
-function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuitCuil: fields.cuitCuil || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories, categoriesBySpecies: Object.fromEntries(Object.entries(CATEGORY_SCHEMA).map(([species, definitions]) => [species, Object.keys(definitions).filter((key) => Boolean(fields.categories[key]))])) }; }
+function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuit: fields.cuit || null, cuil: fields.cuil || null, cuitCuil: fields.cuitCuil || null, document: fields.document || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories, categoriesBySpecies: Object.fromEntries(Object.entries(CATEGORY_SCHEMA).map(([species, definitions]) => [species, Object.keys(definitions).filter((key) => Boolean(fields.categories[key]))])) }; }
+function buildSearchKeys(row, fields, { renspa, sourceIdentifier }) {
+  const raw = {
+    renspa,
+    dni: cleanValue(valueAt(row, fields.dni)),
+    cuit: cleanValue(valueAt(row, fields.cuit)),
+    cuil: cleanValue(valueAt(row, fields.cuil)),
+    document: cleanValue(valueAt(row, fields.document)),
+    cuit_cuil: cleanValue(valueAt(row, fields.cuitCuil)),
+    internal_id: sourceIdentifier,
+  };
+  const normalized = Object.fromEntries(Object.entries(raw).map(([type, value]) => [type, normalizeIdentifier(value)]));
+  // A generic document can be classified without guessing only by its normalized length.
+  if (!normalized.dni && /^\d{7,9}$/.test(normalized.document)) normalized.dni = normalized.document;
+  if (!normalized.cuit_cuil && /^\d{11}$/.test(normalized.document)) normalized.cuit_cuil = normalized.document;
+  if (!normalized.cuit_cuil) normalized.cuit_cuil = normalized.cuit || normalized.cuil;
+  return Object.fromEntries(Object.entries(normalized).filter(([, value]) => value));
+}
+function updateIdentifierCoverage(coverage, searchKeys, seen, output) {
+  for (const [type, stats] of Object.entries(coverage)) {
+    const value = searchKeys[type];
+    if (!value) continue;
+    if (output) { stats.outputRows += 1; continue; }
+    stats.sourceRows += 1;
+    stats.validRows += 1;
+    if (seen[type].has(value)) stats.duplicateRows += 1;
+    else seen[type].add(value);
+  }
+}
 function canonical(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function valueAt(row, field) { return field ? row[field] : ""; }
 function cleanValue(value) { return String(value ?? "").trim().slice(0, 160); }

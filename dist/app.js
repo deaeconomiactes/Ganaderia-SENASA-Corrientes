@@ -215,13 +215,23 @@
     if (!endpoint && isInternalOperationalMode() && activeOperationalState) {
       const normalized = normalizeIdentifier(identifier);
       const searchIndex = await ensureInternalSearchIndex();
-      const types = identifierType === "auto" ? ["renspa", "dni", "cuit_cuil", "internal_id"] : [identifierType];
+      const types = searchTypesFor(identifierType, normalized);
+      const availableTypes = types.filter((type) => Object.keys(searchIndex?.indexes?.[type] || {}).length > 0);
+      if (identifierType !== "auto" && !availableTypes.length) return { found: false, message: "La fuente interna actual no contiene ese identificador." };
       const references = types.flatMap((type) => {
         const found = searchIndex?.indexes?.[type]?.[normalized];
-        return found ? (Array.isArray(found) ? found : [found]) : [];
+        return (found ? (Array.isArray(found) ? found : [found]) : []).map((entry) => ({ entry, type }));
       });
-      const matches = [...new Set(references.map((entry) => typeof entry === "string" ? entry : entry?.id).filter(Boolean))].map((id) => internalProducerLookup.get(id)).filter(Boolean);
-      const noMatchMessage = identifierType === "renspa" || identifierType === "auto" ? "No se encontró un productor con ese RENSPA." : "No se encontró un productor con ese identificador.";
+      const matchTypesById = new Map();
+      references.forEach(({ entry, type }) => {
+        const id = typeof entry === "string" ? entry : entry?.id;
+        if (id) matchTypesById.set(id, [...new Set([...(matchTypesById.get(id) || []), type])]);
+      });
+      const matches = [...matchTypesById.entries()].map(([id, matchTypes]) => {
+        const item = internalProducerLookup.get(id);
+        return item ? { ...item, locatorMatchTypes: matchTypes, locatorMaskedIdentifier: maskSearchIdentifier(normalized, matchTypes[0]) } : null;
+      }).filter(Boolean);
+      const noMatchMessage = identifierType === "renspa" ? "No se encontró productor para ese RENSPA." : "No se encontró productor para ese identificador.";
       return matches.length ? { found: true, matches, message: "Productor localizado en la fuente interna. Los identificadores completos no se muestran." } : { found: false, message: noMatchMessage };
     }
     if (!endpoint) return { found: false, message: "La búsqueda por identificador requiere un servicio seguro autenticado. Esta versión pública sólo permite análisis agregado." };
@@ -248,6 +258,23 @@
 
   function normalizeIdentifier(raw) {
     return String(raw ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 64);
+  }
+
+  function searchTypesFor(identifierType, normalized) {
+    if (identifierType === "renspa") return ["renspa"];
+    if (identifierType === "dni") return ["dni", "document"];
+    if (identifierType === "cuit_cuil") return ["cuit", "cuil", "cuit_cuil", "document"];
+    if (identifierType === "internal_id") return ["internal_id"];
+    if (/^\d{11}$/.test(normalized)) return ["renspa", "cuit", "cuil", "cuit_cuil", "document", "internal_id"];
+    if (/^\d{7,9}$/.test(normalized)) return ["renspa", "dni", "document", "internal_id"];
+    return ["renspa", "cuit", "cuil", "cuit_cuil", "dni", "document", "internal_id"];
+  }
+
+  function maskSearchIdentifier(value, type) {
+    const digits = String(value || "").replace(/\D/g, "");
+    if (type === "dni" || type === "document") return digits ? `DNI **${digits.slice(-4)}` : "DNI enmascarado";
+    if (["cuit", "cuil", "cuit_cuil"].includes(type)) return digits.length >= 3 ? `CUIT/CUIL ${digits.slice(0, 2)}-********-${digits.slice(-1)}` : "CUIT/CUIL enmascarado";
+    return "Identificador enmascarado";
   }
 
   function identifierMatches(item, identifierType, normalized) {
@@ -561,6 +588,7 @@
         negativeTotalRows: normalized.filter((item) => item.totalExistencias < 0).length,
         departments: countValues(normalized, "departamento"),
         renspaSearchKeys: normalized.filter((item) => Boolean(item.searchKeys?.renspa)).length,
+        identifiersCoverage: Object.fromEntries(Object.entries(sourceReport.identifierCoverage || {}).map(([type, coverage]) => [type, Number(coverage?.outputRows || 0)])),
         speciesRows: Object.fromEntries(SPECIES.map(([key]) => [key, normalized.filter((item) => speciesValue(item, key) > 0).length])),
         ...fragmentSummary,
       };
@@ -728,7 +756,7 @@
     document.querySelector(".senasa-nav-note")?.replaceChildren(Object.assign(document.createElement("span"), { className: "status-dot" }), document.createTextNode("Modo interno operativo"));
     const modeBadge = document.querySelector(".senasa-public-badge"); if (modeBadge) modeBadge.innerHTML = '<span class="status-dot"></span>Modo interno operativo';
     const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = source.loading ? "<strong>Modo interno operativo</strong> · Cargando productores…" : source.records?.length ? `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "Datos internos cargados.")} No publicar sin autenticación ni control de acceso.` : `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "No se pudo cargar la fuente interna. Contacte al administrador del dashboard.")}`;
-    const state = { data, loading: Boolean(source.loading), filters: readGlobalFilters(), category: "", minStock: null, maxStock: null, includeZeroStock: false, selected: null, selectedProducer: null, clusterSelection: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", searchIndexUrl: source.searchIndexUrl || "", detailManifestUrl: source.detailManifestUrl || "", indexes: null, filterMemo: new Map(), detailChunkCache: new Map(), map: null, markerLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "" };
+    const state = { data, loading: Boolean(source.loading), filters: readGlobalFilters(), category: "", minStock: null, maxStock: null, includeZeroStock: false, selected: null, selectedProducer: null, clusterSelection: null, expandedCluster: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", searchIndexUrl: source.searchIndexUrl || "", detailManifestUrl: source.detailManifestUrl || "", indexes: null, filterMemo: new Map(), detailChunkCache: new Map(), map: null, markerLayer: null, expandedClusterLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "" };
     activeOperationalState = state;
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     setOperationalControlsDisabled(controls, state.loading);
@@ -753,7 +781,11 @@
     $("#includeZeroStock")?.addEventListener("change", (event) => { state.includeZeroStock = Boolean(event.target.checked); clearOperationalSelection(state); renderOperationalTerritory(data, state); });
     $("#clearOperationalFiltersButton")?.addEventListener("click", () => resetOperationalFilters(state, controls));
     $("#resetMapViewButton")?.addEventListener("click", () => { clearOperationalSelection(state); resetOperationalView(state); renderOperationalTerritory(data, state); });
-    $("#closeProducerDetailButton")?.addEventListener("click", () => { clearOperationalSelection(state); renderOperationalTerritory(data, state); });
+    $("#closeProducerDetailButton")?.addEventListener("click", () => {
+      if ((state.selectedProducer || state.selected) && state.expandedCluster) clearOperationalSelection(state, { preserveExpandedCluster: true, preserveClusterSelection: true });
+      else clearOperationalSelection(state);
+      renderOperationalTerritory(data, state);
+    });
     const map = initProducerMap(state, producerMap, data);
     if (!map) return;
     if (!state.records.length && !state.loading) showOperationalEmpty(source.message);
@@ -799,16 +831,22 @@
     else if (state.visible?.length) state.map?.fitBounds(L.latLngBounds(state.visible.map((item) => [item.lat, item.lon])), { padding: [26, 26], maxZoom: 9, animate: true });
   }
 
-  function clearOperationalSelection(state) {
+  function clearOperationalSelection(state, options = {}) {
     state.selected = null;
     state.selectedProducer = null;
-    state.clusterSelection = null;
+    if (!options.preserveClusterSelection) state.clusterSelection = null;
     state.locatorMatches = null;
     state.selectionSource = "";
     state.detailLoadingId = "";
     state.detailErrorId = "";
     state.selectedMarker = null;
     state.selectedProducerLayer?.clearLayers?.();
+    if (!options.preserveExpandedCluster) clearExpandedCluster(state);
+  }
+
+  function clearExpandedCluster(state) {
+    state.expandedCluster = null;
+    state.expandedClusterLayer?.clearLayers?.();
   }
 
   function readOperationalStockRange() {
@@ -897,11 +935,15 @@
 
     if (data.limite_corrientes) state.boundaryLayer = L.geoJSON(data.limite_corrientes, { style: { color: "#3d7478", weight: 1.4, fillColor: "#8db8b7", fillOpacity: .10 } }).addTo(map);
     state.markerLayer = L.layerGroup().addTo(map);
+    state.expandedClusterLayer = L.layerGroup().addTo(map);
     state.selectedProducerLayer = L.layerGroup().addTo(map);
     const bounds = state.boundaryLayer?.getBounds?.();
     if (bounds?.isValid?.()) map.fitBounds(bounds, { padding: [26, 26] });
     mapDebug("Bounds calculados", bounds?.isValid?.() ? boundsSummary(bounds) : null);
-    const refreshViewportMarkers = debounce(() => renderOperationalMarkers(state), 90);
+    const refreshViewportMarkers = debounce(() => {
+      renderOperationalMarkers(state);
+      renderExpandedClusterLayer(state);
+    }, 90);
     map.on("zoomend moveend", refreshViewportMarkers);
     if (APP_CONFIG.DEBUG_MAP === true) {
       state.debugMarker = L.circleMarker([-28.8, -57.7], { radius: 8, color: "#d06b3c", weight: 2, fillColor: "#f0a25a", fillOpacity: .95 }).addTo(map);
@@ -1189,7 +1231,9 @@
     const limit = Number(APP_CONFIG.INTERNAL_MAX_MARKERS || 800);
     const shouldCluster = rows.length > limit;
     const paddedBounds = state.map.getBounds()?.pad?.(.18);
-    const visualRows = paddedBounds && state.map.getZoom() >= 10 ? rows.filter((item) => paddedBounds.contains([item.lat, item.lon])) : rows;
+    const viewportRows = paddedBounds && state.map.getZoom() >= 10 ? rows.filter((item) => paddedBounds.contains([item.lat, item.lon])) : rows;
+    const expandedIds = new Set((state.expandedCluster?.items || []).map((item) => item.id));
+    const visualRows = expandedIds.size ? viewportRows.filter((item) => !expandedIds.has(item.id)) : viewportRows;
     const groups = shouldCluster ? makeOperationalClusters(visualRows, state.map.getZoom()) : visualRows.map((item) => ({ items: [item], lat: item.lat, lon: item.lon }));
     const maxSpeciesValue = Math.max(...visualRows.map((item) => speciesValue(item, state.filters.species)), 1);
     mapDebug("Marcadores operativos renderizados", { visibleRows: rows.length, markerGroups: groups.length, clustered: shouldCluster, zoom: state.map.getZoom() });
@@ -1205,16 +1249,18 @@
         marker.on("click", () => {
           clearOperationalSelection(state);
           state.clusterSelection = group.items;
+          state.expandedCluster = { items: group.items.slice(), lat: group.lat, lon: group.lon };
           state.selectionSource = "cluster";
           const bounds = L.latLngBounds(group.items.map((item) => [item.lat, item.lon]));
           state.map.fitBounds(bounds, { padding: [32, 32], maxZoom: 12, animate: true });
           renderOperationalTerritory(state.data, state);
+          renderExpandedClusterLayer(state);
         });
         state.markerLayer.addLayer(marker);
         continue;
       }
       const item = group.items[0];
-      if ((state.selectedProducer || state.selected)?.id === item.id) return;
+      if ((state.selectedProducer || state.selected)?.id === item.id) continue;
       const radius = markerRadius(speciesValue(item, state.filters.species), maxSpeciesValue);
       const markerColor = speciesColor(dominantProducerSpecies(item));
       const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "producer-marker-icon", html: `<span class="producer-marker" style="--marker-color:${markerColor};width:${radius}px;height:${radius}px"></span>`, iconSize: [radius + 8, radius + 8], iconAnchor: [(radius + 8) / 2, (radius + 8) / 2] }), zIndexOffset: 100, riseOnHover: true });
@@ -1224,6 +1270,7 @@
       }
       if (cursor < groups.length) { requestAnimationFrame(addBatch); return; }
       renderSelectedProducerLayer(state);
+      renderExpandedClusterLayer(state);
       reportMapVisualState(state, "Después de agregar productores");
       perfLog("render de clusters", renderStarted, `${groups.length} grupos`);
       if (!state.readyLogged && state.records.length) {
@@ -1248,6 +1295,54 @@
     return { ...group, lat: group.items.reduce((sumValue, item) => sumValue + item.lat, 0) / group.items.length, lon: group.items.reduce((sumValue, item) => sumValue + item.lon, 0) / group.items.length };
   }
 
+  function spiderfyExpandedPositions(items, map) {
+    const collisionSize = 24;
+    const buckets = new Map();
+    (items || []).forEach((item) => {
+      const realLatLng = L.latLng(item.lat, item.lon);
+      const realPoint = map.latLngToLayerPoint(realLatLng);
+      const key = `${Math.round(realPoint.x / collisionSize)}:${Math.round(realPoint.y / collisionSize)}`;
+      const bucket = buckets.get(key) || [];
+      bucket.push({ item, realLatLng, realPoint });
+      buckets.set(key, bucket);
+    });
+    const positions = [];
+    buckets.forEach((bucket) => {
+      if (bucket.length === 1) {
+        positions.push({ ...bucket[0], visualLatLng: bucket[0].realLatLng, displaced: false });
+        return;
+      }
+      const center = bucket.reduce((point, entry) => point.add(entry.realPoint), L.point(0, 0)).divideBy(bucket.length);
+      bucket.forEach((entry, index) => {
+        const ring = Math.floor(index / 12);
+        const ringStart = ring * 12;
+        const ringCount = Math.min(12, bucket.length - ringStart);
+        const radius = 30 + ring * 22;
+        const angle = -Math.PI / 2 + ((index - ringStart) / ringCount) * Math.PI * 2;
+        const visualPoint = center.add(L.point(Math.cos(angle) * radius, Math.sin(angle) * radius));
+        positions.push({ ...entry, visualLatLng: map.layerPointToLatLng(visualPoint), displaced: true });
+      });
+    });
+    return positions;
+  }
+
+  function renderExpandedClusterLayer(state) {
+    const layer = state.expandedClusterLayer;
+    const expanded = state.expandedCluster;
+    if (!layer || !state.map) return;
+    layer.clearLayers();
+    if (!expanded?.items?.length) return;
+    const selectedSpecies = normalizeSpeciesKey(state.filters.species) || "bovinos";
+    spiderfyExpandedPositions(expanded.items, state.map).forEach(({ item, realLatLng, visualLatLng, displaced }) => {
+      if (displaced) L.polyline([realLatLng, visualLatLng], { className: "expanded-cluster-leg", color: "#567985", weight: 1, opacity: .58, interactive: false }).addTo(layer);
+      const color = speciesColor(dominantProducerSpecies(item));
+      const marker = L.marker(visualLatLng, { icon: L.divIcon({ className: "expanded-cluster-marker-icon", html: `<span class="expanded-producer-marker" style="--marker-color:${color}"></span>`, iconSize: [26, 26], iconAnchor: [13, 13] }), zIndexOffset: 1200, riseOnHover: true, keyboard: true });
+      marker.bindTooltip(`<div class="expanded-producer-tooltip"><strong>${escapeHtml(item.displayId)}</strong><span>${escapeHtml(speciesLabel(selectedSpecies))}: ${formatNumber.format(speciesValue(item, selectedSpecies))}</span></div>`, { direction: "top", opacity: .96 });
+      marker.on("click", () => selectProducer(item, { state, source: "expanded-cluster", preserveExpandedCluster: true }));
+      marker.addTo(layer);
+    });
+  }
+
   function markerRadius(value, max) { return Math.round(10 + Math.min(12, Math.sqrt(Math.max(0, value) / Math.max(max, 1)) * 12)); }
   function speciesColor(species) { return ({ bovinos: "#2e8d89", bubalinos: "#b17841", ovinos: "#6d91ad", caprinos: "#8b72a5", porcinos: "#9c6472", equinos: "#597d92" })[species] || "#2e8d89"; }
   function sameCoordinateCount(item, state) { return state?.indexes?.coordinateCounts?.get(`${item.lat}|${item.lon}`) || (state?.records || []).filter((candidate) => candidate.lat === item.lat && candidate.lon === item.lon).length; }
@@ -1269,7 +1364,8 @@
       return false;
     }
     if (options.ensureVisible) ensureOperationalItemVisible(item, state);
-    clearOperationalSelection(state);
+    const preserveExpandedCluster = Boolean(options.preserveExpandedCluster || (state.expandedCluster && ["expanded-cluster", "cluster-list"].includes(options.source)));
+    clearOperationalSelection(state, { preserveExpandedCluster, preserveClusterSelection: preserveExpandedCluster });
     state.selected = item;
     state.selectedProducer = item;
     state.selectionSource = options.source || "map";
@@ -1362,6 +1458,7 @@
     const selectedProducer = state.selectedProducer || state.selected;
     if (selectedProducer && APP_CONFIG.ENABLE_PRODUCER_DETAIL !== false) {
       list.hidden = true; detail.hidden = false; close.hidden = false;
+      close.textContent = state.expandedCluster ? "Volver al grupo" : "Volver al resumen";
       detail.innerHTML = producerDetailMarkup(selectedProducer, { sharedCount: sameCoordinateCount(selectedProducer, state), species: state.filters.species, categories: state.availableCategories || [], loading: state.detailLoadingId === selectedProducer.id, error: state.detailErrorId === selectedProducer.id });
       setText("#focusEyebrow", String(state.selectionSource || "").startsWith("search") ? "PRODUCTOR LOCALIZADO" : "FICHA OPERATIVA"); setText("#focusTitle", "Detalle de unidad"); setText("#focusFootnote", "Información interna desagregada. No compartir ni publicar sin autorización.");
       return;
@@ -1376,10 +1473,11 @@
       const matches = state.locatorMatches || state.clusterSelection;
       const isSearch = Boolean(state.locatorMatches);
       close.hidden = false;
-      setText("#focusEyebrow", isSearch ? "RESULTADOS DEL LOCALIZADOR" : "CLUSTER OPERATIVO");
-      setText("#focusTitle", isSearch ? "Productores localizados" : "Productores agrupados");
+      close.textContent = isSearch ? "Volver al resumen" : "Cerrar grupo";
+      setText("#focusEyebrow", isSearch ? "RESULTADOS DEL LOCALIZADOR" : `${formatNumber.format(matches.length)} PRODUCTORES AGRUPADOS`);
+      setText("#focusTitle", isSearch ? "Productores localizados" : "Grupo de productores");
       setText("#focusFootnote", "Seleccione una fila para centrar el mapa y abrir la ficha desagregada.");
-      list.innerHTML = `<p class="cluster-summary">${isSearch ? "Coincidencias encontradas en la fuente interna." : "El mapa agrupa puntos coincidentes para mantener la legibilidad."}</p>${matches.slice(0, 20).map((item, index) => `<button class="ranking-item operational-focus-row cluster-list-item" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio, item.oficinaLocal].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em></span></button>`).join("")}${matches.length > 20 ? `<p class="cluster-summary">Se muestran las primeras 20 de ${formatNumber.format(matches.length)} coincidencias.</p>` : ""}`;
+      list.innerHTML = `<p class="cluster-summary">${isSearch ? `Coincidencias encontradas en la fuente interna. ${formatNumber.format(matches.length)} resultado(s).` : `Grupo expandido: ${formatNumber.format(matches.length)} productores en esta ubicación o zona cercana. Seleccione un productor para ver su ficha desagregada.`}</p>${matches.slice(0, 20).map((item, index) => `<button class="ranking-item operational-focus-row cluster-list-item" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio, item.oficinaLocal].filter(Boolean).join(" · ") || "Ubicación no informada")}</small><small class="ranking-species">${isSearch && item.locatorMatchTypes?.length ? `${escapeHtml(item.locatorMatchTypes.map((value) => ({ dni: "DNI", cuit: "CUIT", cuil: "CUIL", cuit_cuil: "CUIT/CUIL", document: "DOCUMENTO" })[value] || value).join(" / "))} · ${escapeHtml(item.locatorMaskedIdentifier || "Identificador enmascarado")}` : escapeHtml(speciesLabel(dominantProducerSpecies(item)))}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em><small class="ranking-total">${formatNumber.format(item.totalExistencias)} total</small></span></button>`).join("")}${matches.length > 20 ? `<p class="cluster-summary">Se muestran las primeras 20 de ${formatNumber.format(matches.length)} coincidencias.</p>` : ""}`;
       list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = matches.find((row) => row.id === button.dataset.producerId); if (item) selectProducer(item, { state, source: isSearch ? "search-result-list" : "cluster-list", ensureVisible: isSearch }); }));
       return;
     }

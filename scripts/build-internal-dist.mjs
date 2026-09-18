@@ -259,18 +259,22 @@ function toProducerDetail(record) {
   };
 }
 
-function buildSearchIndex(records) {
-  const indexes = { renspa: {}, dni: {}, cuit_cuil: {}, internal_id: {} };
+function buildSearchIndex(records, detailChunkById = new Map()) {
+  const indexes = { renspa: {}, cuit: {}, cuil: {}, dni: {}, document: {}, cuit_cuil: {}, internal_id: {} };
   for (const record of records) {
     for (const [type, rawValue] of Object.entries(record.searchKeys || {})) {
       if (!indexes[type] || !rawValue) continue;
       const value = String(rawValue);
-      const entry = record.id;
+      const entry = { id: record.id, detailChunk: detailChunkById.get(record.id) ?? null };
       const existing = indexes[type][value];
-      indexes[type][value] = existing ? (Array.isArray(existing) ? [...existing, entry] : [existing, entry]) : entry;
+      if (!existing) indexes[type][value] = entry;
+      else {
+        const entries = Array.isArray(existing) ? existing : [existing];
+        if (!entries.some((current) => current.id === entry.id)) indexes[type][value] = [...entries, entry];
+      }
     }
     const internal = String(record.id || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (internal && !indexes.internal_id[internal]) indexes.internal_id[internal] = record.id;
+    if (internal && !indexes.internal_id[internal]) indexes.internal_id[internal] = { id: record.id, detailChunk: detailChunkById.get(record.id) ?? null };
   }
   return { format: "senasa-search-index-v1", records: records.length, indexes };
 }
