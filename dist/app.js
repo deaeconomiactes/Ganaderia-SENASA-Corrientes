@@ -718,7 +718,7 @@
     $("#mapLevelControl").hidden = true;
     const advanced = $("#producerAdvancedFilters");
     if (advanced) { advanced.hidden = false; advanced.open = false; }
-    $("#producerCategoryControl").hidden = false; $("#producerRangeControl").hidden = false; $("#includeZeroStockControl").hidden = false;
+    $("#producerCategoryControl").hidden = false; $("#producerMinStockControl").hidden = false; $("#producerMaxStockControl").hidden = false; $("#includeZeroStockControl").hidden = false;
     ["#drawAreaButton", "#finishAreaButton", "#clearAreaButton"].forEach((selector) => { const button = $(selector); if (button) button.hidden = true; });
     const clearFiltersButton = $("#clearOperationalFiltersButton"); if (clearFiltersButton) clearFiltersButton.hidden = false;
     setText("#metricRecordsLabel", "UNIDADES PRODUCTIVAS"); setText("#metricMapUnitLabel", "PRODUCTORES GEOREFERENCIADOS"); setText("#metricMapUnitNote", "Uso interno · según filtros");
@@ -728,7 +728,7 @@
     document.querySelector(".senasa-nav-note")?.replaceChildren(Object.assign(document.createElement("span"), { className: "status-dot" }), document.createTextNode("Modo interno operativo"));
     const modeBadge = document.querySelector(".senasa-public-badge"); if (modeBadge) modeBadge.innerHTML = '<span class="status-dot"></span>Modo interno operativo';
     const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = source.loading ? "<strong>Modo interno operativo</strong> · Cargando productores…" : source.records?.length ? `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "Datos internos cargados.")} No publicar sin autenticación ni control de acceso.` : `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "No se pudo cargar la fuente interna. Contacte al administrador del dashboard.")}`;
-    const state = { data, loading: Boolean(source.loading), filters: readGlobalFilters(), category: "", minStock: 0, includeZeroStock: false, selected: null, selectedProducer: null, clusterSelection: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", searchIndexUrl: source.searchIndexUrl || "", detailManifestUrl: source.detailManifestUrl || "", indexes: null, filterMemo: new Map(), detailChunkCache: new Map(), map: null, markerLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "" };
+    const state = { data, loading: Boolean(source.loading), filters: readGlobalFilters(), category: "", minStock: null, maxStock: null, includeZeroStock: false, selected: null, selectedProducer: null, clusterSelection: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", searchIndexUrl: source.searchIndexUrl || "", detailManifestUrl: source.detailManifestUrl || "", indexes: null, filterMemo: new Map(), detailChunkCache: new Map(), map: null, markerLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "" };
     activeOperationalState = state;
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     setOperationalControlsDisabled(controls, state.loading);
@@ -739,7 +739,17 @@
     });
     updateCategoryOptions(state.filters.species, state);
     $("#producerCategorySelect")?.addEventListener("change", (event) => { state.category = event.target.value; clearOperationalSelection(state); renderOperationalTerritory(data, state); });
-    $("#producerMinStock")?.addEventListener("input", debounce((event) => { state.minStock = positiveNumber(event.target.value); clearOperationalSelection(state); renderOperationalTerritory(data, state); }, 180));
+    const applyStockRange = debounce(() => {
+      const range = readOperationalStockRange();
+      if (!range.valid) { showOperationalRangeWarning(range.message); return; }
+      showOperationalRangeWarning("");
+      state.minStock = range.min;
+      state.maxStock = range.max;
+      clearOperationalSelection(state);
+      renderOperationalTerritory(data, state);
+    }, 200);
+    $("#producerMinStock")?.addEventListener("input", applyStockRange);
+    $("#producerMaxStock")?.addEventListener("input", applyStockRange);
     $("#includeZeroStock")?.addEventListener("change", (event) => { state.includeZeroStock = Boolean(event.target.checked); clearOperationalSelection(state); renderOperationalTerritory(data, state); });
     $("#clearOperationalFiltersButton")?.addEventListener("click", () => resetOperationalFilters(state, controls));
     $("#resetMapViewButton")?.addEventListener("click", () => { clearOperationalSelection(state); resetOperationalView(state); renderOperationalTerritory(data, state); });
@@ -780,7 +790,7 @@
 
   function setOperationalControlsDisabled(controls, disabled) {
     Object.values(controls || {}).forEach((control) => { if (control) control.disabled = disabled; });
-    ["#producerCategorySelect", "#producerMinStock", "#includeZeroStock", "#clearOperationalFiltersButton", "#locatorInput", "#locatorType"].forEach((selector) => { const control = $(selector); if (control) control.disabled = disabled; });
+    ["#producerCategorySelect", "#producerMinStock", "#producerMaxStock", "#includeZeroStock", "#clearOperationalFiltersButton", "#locatorInput", "#locatorType"].forEach((selector) => { const control = $(selector); if (control) control.disabled = disabled; });
   }
 
   function resetOperationalView(state) {
@@ -801,16 +811,43 @@
     state.selectedProducerLayer?.clearLayers?.();
   }
 
+  function readOperationalStockRange() {
+    const parse = (selector, label) => {
+      const input = $(selector);
+      const raw = String(input?.value ?? "").trim();
+      if (!raw) return { value: null };
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) return { error: `${label} debe ser un número entero no negativo.` };
+      return { value };
+    };
+    const min = parse("#producerMinStock", "El mínimo");
+    const max = parse("#producerMaxStock", "El máximo");
+    if (min.error || max.error) return { valid: false, message: min.error || max.error };
+    if (min.value !== null && max.value !== null && min.value > max.value) return { valid: false, message: "El mínimo no puede ser mayor que el máximo." };
+    return { valid: true, min: min.value, max: max.value };
+  }
+
+  function showOperationalRangeWarning(message) {
+    const warning = $("#producerRangeWarning");
+    if (!warning) return;
+    warning.textContent = message || "";
+    warning.hidden = !message;
+    ["#producerMinStock", "#producerMaxStock"].forEach((selector) => $(selector)?.setAttribute("aria-invalid", message ? "true" : "false"));
+  }
+
   function resetOperationalFilters(state, controls) {
     Object.assign(state.filters, defaultFilters());
     state.category = "";
-    state.minStock = 0;
+    state.minStock = null;
+    state.maxStock = null;
     state.includeZeroStock = false;
     clearOperationalSelection(state);
     const advanced = $("#producerAdvancedFilters");
     if (advanced) advanced.open = false;
     const category = $("#producerCategorySelect"); if (category) category.value = "";
     const minStock = $("#producerMinStock"); if (minStock) minStock.value = "";
+    const maxStock = $("#producerMaxStock"); if (maxStock) maxStock.value = "";
+    showOperationalRangeWarning("");
     const includeZero = $("#includeZeroStock"); if (includeZero) includeZero.checked = false;
     const locatorInput = $("#locatorInput"); if (locatorInput) locatorInput.value = "";
     syncOperationalLocationControls(state.records, state.filters, controls);
@@ -1036,7 +1073,7 @@
     const effectiveCount = state.includeZeroStock ? all.length : (state.indexes?.positiveTotal?.size ?? all.filter((item) => Number(item.totalExistencias) > 0).length);
     const speciesAvailable = !selectedSpecies || Boolean(state.indexes?.species?.get(selectedSpecies)?.size ?? all.some((item) => speciesValue(item, selectedSpecies) > 0));
     state.speciesWarning = selectedSpecies && !speciesAvailable ? `La fuente interna no contiene valores positivos para ${speciesLabel(selectedSpecies)}.` : "";
-    const memoKey = [selectedSpecies || "all", filters.department || "all", filters.municipality || "", filters.office || "", state.category || "", Number(state.minStock || 0), state.includeZeroStock ? 1 : 0].join("|");
+    const memoKey = [selectedSpecies || "all", filters.department || "all", filters.municipality || "", filters.office || "", state.category || "", state.minStock ?? "", state.maxStock ?? "", state.includeZeroStock ? 1 : 0].join("|");
     if (state.filterMemo?.has(memoKey)) return state.filterMemo.get(memoKey);
     const filterStarted = performance.now();
     let candidates = state.includeZeroStock ? new Set(all.map((item) => item.id)) : new Set(state.indexes?.positiveTotal || all.filter((item) => Number(item.totalExistencias) > 0).map((item) => item.id));
@@ -1046,7 +1083,12 @@
     if (filters.municipality) intersect(state.indexes?.municipality?.get(filters.municipality));
     if (filters.office) intersect(state.indexes?.office?.get(filters.office));
     if (state.category) intersect(state.indexes?.category?.get(state.category));
-    const rows = [...candidates].map((id) => state.indexes?.byId?.get(id)).filter((item) => item && Number(item.totalExistencias) >= Number(state.minStock || 0));
+    const stockValue = (item) => state.category ? positiveNumber(item?.categorias?.[state.category]) : selectedSpecies ? speciesValue(item, selectedSpecies) : positiveNumber(item.totalExistencias);
+    const rows = [...candidates].map((id) => state.indexes?.byId?.get(id)).filter((item) => {
+      if (!item) return false;
+      const value = stockValue(item);
+      return (state.minStock === null || value >= state.minStock) && (state.maxStock === null || value <= state.maxStock);
+    });
     state.filterMemo?.set(memoKey, rows);
     if (state.filterMemo?.size > 30) state.filterMemo.delete(state.filterMemo.keys().next().value);
     perfLog("aplicación de filtros", filterStarted, `${rows.length} visibles`);
@@ -1063,7 +1105,8 @@
       final: rows.length,
       selectedSpecies: selectedSpecies || "all",
       includeZeroStock: Boolean(state.includeZeroStock),
-      minStock: Number(state.minStock || 0),
+      minStock: state.minStock,
+      maxStock: state.maxStock,
     };
     mapDebug("Filtrado operativo por etapas", state.diagnostics);
     return rows;
@@ -1300,12 +1343,16 @@
     filters.municipality = item.municipio || "";
     filters.office = item.oficinaLocal || "";
     state.category = "";
-    state.minStock = 0;
+    state.minStock = null;
+    state.maxStock = null;
     state.includeZeroStock = true;
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     syncOperationalLocationControls(state.records, filters, controls);
     updateCategoryOptions(filters.species, state);
     const includeZero = $("#includeZeroStock"); if (includeZero) includeZero.checked = true;
+    const minStock = $("#producerMinStock"); if (minStock) minStock.value = "";
+    const maxStock = $("#producerMaxStock"); if (maxStock) maxStock.value = "";
+    showOperationalRangeWarning("");
     const advanced = $("#producerAdvancedFilters"); if (advanced) advanced.open = false;
     saveGlobalFilters(filters);
   }
@@ -1381,9 +1428,14 @@
       ["Municipio", state.filters.municipality ? titleCase(state.filters.municipality) : "Todos"],
       ["Oficina local", state.filters.office ? titleCase(state.filters.office) : "Todas"],
       ["Categoría", state.category ? (PRODUCER_CATEGORY_LABELS[state.category] || titleCase(state.category.replaceAll("_", " "))) : state.availableCategories?.length ? "Todas" : "Sin categorías disponibles"],
-      ["Mínimo", state.minStock ? `${formatNumber.format(state.minStock)} cabezas` : "Sin mínimo"],
       ["Cero", state.includeZeroStock ? "Incluidos" : "Excluidos"],
     ];
+    if (state.minStock !== null || state.maxStock !== null) {
+      const range = state.minStock !== null && state.maxStock !== null
+        ? `${formatNumber.format(state.minStock)} a ${formatNumber.format(state.maxStock)}`
+        : state.minStock !== null ? `desde ${formatNumber.format(state.minStock)}` : `hasta ${formatNumber.format(state.maxStock)}`;
+      labels.splice(labels.length - 1, 0, ["Rango", `${range} cabezas`]);
+    }
     target.innerHTML = `<span class="filter-count">${formatNumber.format(count)} visibles</span>${labels.map(([label, value]) => `<span class="operational-filter-chip">${escapeHtml(label)}: ${escapeHtml(value)}</span>`).join("")}`;
   }
 

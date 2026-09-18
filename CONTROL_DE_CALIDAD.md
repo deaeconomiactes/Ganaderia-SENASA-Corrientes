@@ -40,6 +40,8 @@
 - [ ] En modo interno no aparece el selector de “Vista pública”
 - [ ] Los filtros primarios muestran especie ganadera, departamento, municipio y oficina local
 - [ ] “Filtros avanzados” inicia cerrado y “Limpiar filtros” restaura especie, ubicación, categoría, rango, ceros, selección y vista
+- [ ] El rango acepta límites vacíos, aplica `desde`/`hasta` de forma inclusiva sobre categoría → especie → total y no actualiza resultados si el mínimo supera al máximo
+- [ ] Cambiar de Bovinos a Caprinos reaplica el mismo rango sobre la nueva especie; los chips reflejan `desde`, `hasta` o ambos límites
 - [ ] Cada cluster se puede inspeccionar desde el panel lateral y permite seleccionar una unidad
 - [ ] Mapa, ranking, cluster y búsqueda pasan por `selectProducer()`
 - [ ] `selectedProducerLayer` queda por encima de clusters y markers normales
