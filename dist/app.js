@@ -932,18 +932,20 @@
     state.container = producerMap;
     mapDebug("Instancia Leaflet creada:", Boolean(state.map));
 
-    const tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap contributors" });
-    state.tileLayer = tileLayer;
-    let tileErrorReported = false;
-    tileLayer.on("load", () => mapDebug("Tile layer cargado: true"));
-    tileLayer.on("tileerror", () => {
-      if (tileErrorReported) return;
-      tileErrorReported = true;
-      mapDebug("Tile layer cargado: false");
-      setText("#mapFooterNotice", "El mapa base no pudo cargar algunos tiles. Revise la conectividad del entorno interno.");
-    });
-    tileLayer.addTo(map);
-    mapDebug("Tile layer agregado: true");
+    const defaultBasemaps = {
+      standard: { label: "Mapa", url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", maxZoom: 18, attribution: "© OpenStreetMap contributors" },
+      satellite: { label: "Satélite", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", maxZoom: 19, attribution: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community" },
+    };
+    const basemapConfig = { ...defaultBasemaps, ...(APP_CONFIG.BASEMAPS || {}) };
+    const configuredDefault = APP_CONFIG.MAP_BASE_LAYER_DEFAULT;
+    const storedBasemap = readStoredBasemap();
+    const initialBasemap = basemapConfig[storedBasemap] ? storedBasemap : (basemapConfig[configuredDefault] ? configuredDefault : "standard");
+    state.baseLayers = Object.fromEntries(Object.entries(basemapConfig).map(([key, config]) => [key, createBaseLayer(key, config)]));
+    state.activeBasemap = initialBasemap;
+    state.tileLayer = state.baseLayers[initialBasemap];
+    state.tileLayer.addTo(map);
+    addBasemapSwitcher(map, state, basemapConfig);
+    mapDebug("Capa base agregada:", initialBasemap);
 
     if (data.limite_corrientes) state.boundaryLayer = L.geoJSON(data.limite_corrientes, { style: { color: "#3d7478", weight: 1.4, fillColor: "#8db8b7", fillOpacity: .10 } }).addTo(map);
     state.markerLayer = L.layerGroup().addTo(map);
@@ -973,6 +975,62 @@
     map.whenReady(() => { invalidate(); mapDebug("Mapa Leaflet inicializado: true"); });
     reportMapVisualState(state, "Después de init");
     return map;
+
+    function createBaseLayer(key, config) {
+      const layer = L.tileLayer(config.url, { maxZoom: config.maxZoom || 18, attribution: config.attribution || "" });
+      let tileErrorReported = false;
+      layer.on("load", () => mapDebug(`Capa base cargada: ${key}`));
+      layer.on("tileerror", () => {
+        if (tileErrorReported) return;
+        tileErrorReported = true;
+        mapDebug(`Capa base no pudo cargar tiles: ${key}`);
+        setText("#mapFooterNotice", "El mapa base no pudo cargar algunos tiles. Revise la conectividad del entorno interno.");
+      });
+      return layer;
+    }
+
+    function readStoredBasemap() {
+      try { return window.localStorage.getItem("senasaBasemap"); } catch { return null; }
+    }
+
+    function addBasemapSwitcher(leafletMap, mapState, layers) {
+      const control = L.control({ position: "topright" });
+      control.onAdd = () => {
+        const container = L.DomUtil.create("div", "basemap-switcher");
+        container.setAttribute("role", "group");
+        container.setAttribute("aria-label", "Mapa base");
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        Object.entries(layers).forEach(([key, config]) => {
+          const button = L.DomUtil.create("button", "basemap-option", container);
+          button.type = "button";
+          button.textContent = config.label || key;
+          button.dataset.basemap = key;
+          button.classList.toggle("active", key === mapState.activeBasemap);
+          button.setAttribute("aria-pressed", String(key === mapState.activeBasemap));
+          L.DomEvent.on(button, "click", () => setBasemap(key));
+        });
+        mapState.basemapControl = container;
+        return container;
+      };
+      control.addTo(leafletMap);
+
+      function setBasemap(key) {
+        if (!mapState.baseLayers[key] || key === mapState.activeBasemap) return;
+        const previous = mapState.baseLayers[mapState.activeBasemap];
+        if (previous && leafletMap.hasLayer(previous)) leafletMap.removeLayer(previous);
+        mapState.baseLayers[key].addTo(leafletMap);
+        mapState.activeBasemap = key;
+        mapState.tileLayer = mapState.baseLayers[key];
+        mapState.basemapControl?.querySelectorAll(".basemap-option").forEach((button) => {
+          const active = button.dataset.basemap === key;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+        try { window.localStorage.setItem("senasaBasemap", key); } catch { /* Storage may be disabled. */ }
+        mapDebug("Capa base seleccionada:", key);
+      }
+    }
   }
 
   function boundsSummary(bounds) {
