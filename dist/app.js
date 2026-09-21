@@ -53,6 +53,13 @@
   const sum = (items, key) => items.reduce((total, item) => total + (key ? value(item, key) : Number(item || 0)), 0);
 
   const APP_CONFIG = window.APP_CONFIG || {};
+  const canShowFullIdentifiers = () => APP_CONFIG.PUBLIC_SAFE_MODE !== true && APP_CONFIG.INTERNAL_MODE === true && APP_CONFIG.SHOW_FULL_IDENTIFIERS === true;
+  function formatIdentifier(value, type, options = {}) {
+    const text = String(value ?? "").trim();
+    if (!text) return "No informado";
+    if (options.full === true || canShowFullIdentifiers()) return text;
+    return maskIdentifier(text);
+  }
   const SECURE_LOCATOR_ENDPOINT = window.APP_CONFIG?.SECURE_LOCATOR_ENDPOINT || null;
   const PERF_START = performance.now();
   let internalProducerLookup = new Map();
@@ -627,14 +634,14 @@
       const detailChunks = Array.isArray(rawData?._detailChunks) ? rawData._detailChunks : [];
       return rows.map((row) => ({
         id: safeOperationalId(row.i, 0),
-        displayId: safeText(row.d) || `Unidad ${safeText(row.i)}`,
+        displayId: canShowFullIdentifiers() && (row.n?.displayName || row.n?.name || row.n?.legalName) ? safeText(row.n.displayName || row.n.name || row.n.legalName) : (safeText(row.d) || `Unidad ${safeText(row.i)}`),
         renspaMasked: safeText(row.r),
         lat: parseCoordinate(row.a), lon: parseCoordinate(row.o),
         departamento: safeText(row.p), municipio: safeText(row.m), oficinaLocal: safeText(row.f),
         totalExistencias: positiveNumber(row.t),
         especies: Object.fromEntries(wireSpecies.map((key, index) => [key, positiveNumber(row.e?.[index])])),
         categorias: {}, categoryKeys: Array.isArray(row.c) ? row.c.map(safeText).filter(Boolean) : [],
-        detailChunk: detailChunks[Number(row.x)] || "", rawSafe: {}, searchKeys: {}, searchTokens: [],
+        detailChunk: detailChunks[Number(row.x)] || "", rawSafe: {}, searchKeys: {}, searchTokens: [], identifiers: row.h && typeof row.h === "object" ? row.h : {}, person: row.n && typeof row.n === "object" ? row.n : {},
       }));
     }
     const fields = detectLivestockFields(rows);
@@ -668,15 +675,18 @@
       const declaredTotal = numericValue(get("total"));
       const totalExistencias = declaredTotal > 0 ? declaredTotal : totalFromParts;
       const existingDisplayId = safeText(row?.displayId);
+      const identifiers = row?.identifiers && typeof row.identifiers === "object" ? row.identifiers : { renspa: rawRenspa || "", dni: get("dni") || "", cuit: get("cuit") || "", cuil: get("cuil") || "", document: get("document") || "" };
+      const person = row?.person && typeof row.person === "object" ? row.person : {};
+      const fullRenspa = formatIdentifier(identifiers.renspa || rawRenspa, "renspa");
       const categoryKeys = Array.isArray(row?.categoryKeys) ? row.categoryKeys.map(safeText).filter(Boolean) : Object.keys(categories).filter((key) => positiveNumber(categories[key]) > 0);
       return {
         id,
-        displayId: rawRenspa ? `RENSPA ${maskIdentifier(rawRenspa)}` : existingDisplayId || (maskedRenspa ? `RENSPA ${maskedRenspa}` : `Unidad ${id}`),
+        displayId: canShowFullIdentifiers() && (person.displayName || person.name || person.legalName) ? safeText(person.displayName || person.name || person.legalName) : rawRenspa ? `RENSPA ${fullRenspa}` : existingDisplayId || (maskedRenspa ? `RENSPA ${maskedRenspa}` : `Unidad ${id}`),
         renspaMasked: rawRenspa ? maskIdentifier(rawRenspa) : maskedRenspa,
         lat: parseCoordinate(get("lat")), lon: parseCoordinate(get("lon")),
         departamento: safeText(get("departamento")), municipio: safeText(get("municipio")), oficinaLocal: safeText(get("oficina")),
         totalExistencias,
-        especies: species, categorias: categories, categoryKeys, detailChunk: safeText(row?.detailChunk), rawSafe: {}, searchKeys,
+        especies: species, categorias: categories, categoryKeys, detailChunk: safeText(row?.detailChunk), rawSafe: {}, searchKeys, identifiers, person,
         searchTokens: [...Object.values(searchKeys), normalizeIdentifier(get("id"))].filter(Boolean),
       };
     });
@@ -747,7 +757,7 @@
     const advanced = $("#producerAdvancedFilters");
     if (advanced) { advanced.hidden = false; advanced.open = false; }
     $("#producerCategoryControl").hidden = false; $("#producerRangeControl").hidden = false; $("#producerMinStockControl").hidden = false; $("#producerMaxStockControl").hidden = false; $("#includeZeroStockControl").hidden = false;
-    ["#drawAreaButton", "#finishAreaButton", "#clearAreaButton"].forEach((selector) => { const button = $(selector); if (button) button.hidden = true; });
+    ["#drawAreaButton", "#finishAreaButton", "#cancelAreaButton", "#clearAreaButton"].forEach((selector) => { const button = $(selector); if (button) button.hidden = selector !== "#drawAreaButton"; });
     const clearFiltersButton = $("#clearOperationalFiltersButton"); if (clearFiltersButton) clearFiltersButton.hidden = false;
     setText("#metricRecordsLabel", "UNIDADES PRODUCTIVAS"); setText("#metricMapUnitLabel", "PRODUCTORES GEOREFERENCIADOS"); setText("#metricMapUnitNote", "Uso interno · según filtros");
     setText("#mapLayerContext", "Productores georreferenciados con información ganadera desagregada · uso interno autorizado");
@@ -756,7 +766,7 @@
     document.querySelector(".senasa-nav-note")?.replaceChildren(Object.assign(document.createElement("span"), { className: "status-dot" }), document.createTextNode("Modo interno operativo"));
     const modeBadge = document.querySelector(".senasa-public-badge"); if (modeBadge) modeBadge.innerHTML = '<span class="status-dot"></span>Modo interno operativo';
     const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = source.loading ? "<strong>Modo interno operativo</strong> · Cargando productores…" : source.records?.length ? `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "Datos internos cargados.")} No publicar sin autenticación ni control de acceso.` : `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "No se pudo cargar la fuente interna. Contacte al administrador del dashboard.")}`;
-    const state = { data, loading: Boolean(source.loading), filters: readGlobalFilters(), category: "", minStock: null, maxStock: null, includeZeroStock: false, selected: null, selectedProducer: null, clusterSelection: null, expandedCluster: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", searchIndexUrl: source.searchIndexUrl || "", detailManifestUrl: source.detailManifestUrl || "", indexes: null, filterMemo: new Map(), detailChunkCache: new Map(), map: null, markerLayer: null, expandedClusterLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "" };
+    const state = { data, loading: Boolean(source.loading), filters: readGlobalFilters(), category: "", minStock: null, maxStock: null, includeZeroStock: false, selected: null, selectedProducer: null, clusterSelection: null, expandedCluster: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", searchIndexUrl: source.searchIndexUrl || "", detailManifestUrl: source.detailManifestUrl || "", indexes: null, filterMemo: new Map(), detailChunkCache: new Map(), map: null, markerLayer: null, expandedClusterLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "", areaMode: "browse", drawingVertices: [], activePolygon: null, areaLayer: null, areaDraftLayer: null, areaVertexLayer: null };
     activeOperationalState = state;
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     setOperationalControlsDisabled(controls, state.loading);
@@ -788,6 +798,7 @@
     });
     const map = initProducerMap(state, producerMap, data);
     if (!map) return;
+    bindOperationalAreaTools(state);
     if (!state.records.length && !state.loading) showOperationalEmpty(source.message);
     renderOperationalTerritory(data, state);
     return state;
@@ -879,6 +890,7 @@
     state.minStock = null;
     state.maxStock = null;
     state.includeZeroStock = false;
+    state.clearArea?.();
     clearOperationalSelection(state);
     const advanced = $("#producerAdvancedFilters");
     if (advanced) advanced.open = false;
@@ -968,6 +980,78 @@
     const southWest = bounds.getSouthWest();
     const northEast = bounds.getNorthEast();
     return { south: Number(southWest.lat.toFixed(4)), west: Number(southWest.lng.toFixed(4)), north: Number(northEast.lat.toFixed(4)), east: Number(northEast.lng.toFixed(4)) };
+  }
+
+  function bindOperationalAreaTools(state) {
+    const map = state.map;
+    if (!map) return;
+    const redraw = () => renderOperationalArea(state);
+    const start = () => {
+      state.areaMode = "drawing";
+      state.drawingVertices = [];
+      state.activePolygon = null;
+      state.filterMemo?.clear();
+      map.doubleClickZoom.disable();
+      redraw();
+      setText("#selectionStatus", "0 vértices · haga clic en el mapa y use Finalizar área.");
+    };
+    const cancel = () => {
+      state.areaMode = "browse";
+      state.drawingVertices = [];
+      map.doubleClickZoom.enable();
+      redraw();
+      renderOperationalTerritory(state.data, state);
+    };
+    const finish = () => {
+      if (state.drawingVertices.length < 3) { setText("#selectionStatus", "Se requieren al menos 3 vértices para finalizar el área."); return; }
+      state.activePolygon = state.drawingVertices.slice();
+      state.areaMode = "active";
+      state.drawingVertices = [];
+      state.filterMemo?.clear();
+      map.doubleClickZoom.enable();
+      redraw();
+      const bounds = L.latLngBounds(state.activePolygon);
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [32, 32], maxZoom: 14, animate: true });
+      renderOperationalTerritory(state.data, state);
+    };
+    const clear = () => {
+      state.areaMode = "browse";
+      state.drawingVertices = [];
+      state.activePolygon = null;
+      state.filterMemo?.clear();
+      map.doubleClickZoom.enable();
+      redraw();
+      renderOperationalTerritory(state.data, state);
+    };
+    $("#drawAreaButton")?.addEventListener("click", start);
+    $("#finishAreaButton")?.addEventListener("click", finish);
+    $("#cancelAreaButton")?.addEventListener("click", cancel);
+    $("#clearAreaButton")?.addEventListener("click", clear);
+    state.clearArea = clear;
+    map.on("click", (event) => {
+      if (state.areaMode !== "drawing") return;
+      state.drawingVertices.push([event.latlng.lat, event.latlng.lng]);
+      redraw();
+      setText("#selectionStatus", `${state.drawingVertices.length} vértices · haga clic para continuar o Finalizar área.`);
+    });
+    map.on("dblclick", (event) => { if (state.areaMode === "drawing") { L.DomEvent.stop(event); finish(); } });
+  }
+
+  function renderOperationalArea(state) {
+    const map = state.map;
+    if (!map) return;
+    ["areaLayer", "areaDraftLayer", "areaVertexLayer"].forEach((key) => { state[key]?.remove?.(); state[key] = null; });
+    const polygon = state.activePolygon || [];
+    const drawing = state.drawingVertices || [];
+    if (polygon.length >= 3) state.areaLayer = L.polygon(polygon, { className: "leaflet-area-polygon", color: "#42d7c4", weight: 2.5, fillColor: "#26baa9", fillOpacity: .22, interactive: false }).addTo(map);
+    if (state.areaMode === "drawing" && drawing.length) state.areaDraftLayer = L.polyline(drawing, { className: "leaflet-area-draft", color: "#74f0df", weight: 2.5, interactive: false }).addTo(map);
+    const vertices = polygon.length ? polygon : drawing;
+    if (vertices.length) state.areaVertexLayer = L.layerGroup(vertices.map((point) => L.circleMarker(point, { className: "leaflet-area-vertex", radius: 5, color: "#d8fffa", weight: 2, fillColor: "#1eaaa0", fillOpacity: 1, interactive: false }))).addTo(map);
+    const draw = $("#drawAreaButton"), finish = $("#finishAreaButton"), cancel = $("#cancelAreaButton"), clear = $("#clearAreaButton");
+    if (draw) draw.hidden = state.areaMode === "drawing";
+    if (finish) finish.hidden = state.areaMode !== "drawing";
+    if (cancel) cancel.hidden = state.areaMode !== "drawing";
+    if (clear) clear.hidden = !polygon.length && state.areaMode !== "drawing";
   }
 
   function reportMapVisualState(state, stage) {
@@ -1115,7 +1199,8 @@
     const effectiveCount = state.includeZeroStock ? all.length : (state.indexes?.positiveTotal?.size ?? all.filter((item) => Number(item.totalExistencias) > 0).length);
     const speciesAvailable = !selectedSpecies || Boolean(state.indexes?.species?.get(selectedSpecies)?.size ?? all.some((item) => speciesValue(item, selectedSpecies) > 0));
     state.speciesWarning = selectedSpecies && !speciesAvailable ? `La fuente interna no contiene valores positivos para ${speciesLabel(selectedSpecies)}.` : "";
-    const memoKey = [selectedSpecies || "all", filters.department || "all", filters.municipality || "", filters.office || "", state.category || "", state.minStock ?? "", state.maxStock ?? "", state.includeZeroStock ? 1 : 0].join("|");
+    const areaKey = state.activePolygon?.map(([lat, lon]) => `${lat.toFixed(6)},${lon.toFixed(6)}`).join(";") || "";
+    const memoKey = [selectedSpecies || "all", filters.department || "all", filters.municipality || "", filters.office || "", state.category || "", state.minStock ?? "", state.maxStock ?? "", state.includeZeroStock ? 1 : 0, areaKey].join("|");
     if (state.filterMemo?.has(memoKey)) return state.filterMemo.get(memoKey);
     const filterStarted = performance.now();
     let candidates = state.includeZeroStock ? new Set(all.map((item) => item.id)) : new Set(state.indexes?.positiveTotal || all.filter((item) => Number(item.totalExistencias) > 0).map((item) => item.id));
@@ -1129,7 +1214,7 @@
     const rows = [...candidates].map((id) => state.indexes?.byId?.get(id)).filter((item) => {
       if (!item) return false;
       const value = stockValue(item);
-      return (state.minStock === null || value >= state.minStock) && (state.maxStock === null || value <= state.maxStock);
+      return (state.minStock === null || value >= state.minStock) && (state.maxStock === null || value <= state.maxStock) && (!state.activePolygon?.length || pointInPolygon([item.lat, item.lon], state.activePolygon));
     });
     state.filterMemo?.set(memoKey, rows);
     if (state.filterMemo?.size > 30) state.filterMemo.delete(state.filterMemo.keys().next().value);
@@ -1144,6 +1229,7 @@
       municipality: filters.municipality ? state.indexes?.municipality?.get(filters.municipality)?.size || 0 : effectiveCount,
       office: filters.office ? state.indexes?.office?.get(filters.office)?.size || 0 : effectiveCount,
       category: state.category ? state.indexes?.category?.get(state.category)?.size || 0 : effectiveCount,
+      area: state.activePolygon?.length ? rows.length : null,
       final: rows.length,
       selectedSpecies: selectedSpecies || "all",
       includeZeroStock: Boolean(state.includeZeroStock),
@@ -1200,7 +1286,7 @@
       return;
     }
     if (!visibleCount) {
-      showOperationalEmpty("No hay productores visibles para los filtros seleccionados.");
+      showOperationalEmpty(state.activePolygon?.length ? "No hay productores dentro del área seleccionada." : "No hay productores visibles para los filtros seleccionados.");
       return;
     }
     empty.hidden = true;
@@ -1363,6 +1449,12 @@
       mapDebug("Selección rechazada", { producerId: Boolean(item?.id), latLonValid: validCoordinatePair(item?.lat, item?.lon) });
       return false;
     }
+    if (state.activePolygon?.length && !pointInPolygon([item.lat, item.lon], state.activePolygon)) {
+      clearOperationalSelection(state);
+      setText("#selectionStatus", "El productor seleccionado queda fuera del área dibujada.");
+      renderOperationalTerritory(state.data, state);
+      return false;
+    }
     if (options.ensureVisible) ensureOperationalItemVisible(item, state);
     const preserveExpandedCluster = Boolean(options.preserveExpandedCluster || (state.expandedCluster && ["expanded-cluster", "cluster-list"].includes(options.source)));
     clearOperationalSelection(state, { preserveExpandedCluster, preserveClusterSelection: preserveExpandedCluster });
@@ -1402,6 +1494,8 @@
       const detail = records.find((record) => record?.id === item.id);
       if (!detail) throw new Error("Detalle no encontrado en el fragmento.");
       item.paraje = safeText(detail.paraje);
+      item.identifiers = detail.identifiers && typeof detail.identifiers === "object" ? detail.identifiers : item.identifiers || {};
+      item.person = detail.person && typeof detail.person === "object" ? detail.person : item.person || {};
       item.categorias = detail.categorias && typeof detail.categorias === "object" ? detail.categorias : {};
       item.categoryKeys = Object.keys(item.categorias).filter((key) => positiveNumber(item.categorias[key]) > 0);
       item.detailLoaded = true;
@@ -1515,7 +1609,10 @@
         : Object.entries(item.categorias || {}).filter(([key, value]) => compatible.has(key) && positiveNumber(value) > 0).sort((a, b) => b[1] - a[1]).map(([key, value]) => `<tr><td>${escapeHtml(PRODUCER_CATEGORY_LABELS[key] || titleCase(key.replaceAll("_", " ")))}</td><td>${formatNumber.format(value)}</td></tr>`).join("") || `<tr><td colspan="2">Sin categorías de ${escapeHtml(speciesLabel(selectedSpecies).toLowerCase())} informadas.</td></tr>`;
     const location = [item.departamento, item.municipio, item.oficinaLocal, item.paraje].filter(Boolean).join(" · ") || "Ubicación administrativa no informada";
     const sharedNotice = Number(options.sharedCount || 0) > 1 ? `<p class="producer-shared-note">Ubicación compartida por ${formatNumber.format(options.sharedCount)} productores.</p>` : "";
-    return `<div class="producer-detail-header"><h3>${escapeHtml(item.displayId)}</h3><p>${escapeHtml(location)}</p><small class="producer-detail-id">ID operativo: ${escapeHtml(item.id)}${item.renspaMasked ? ` · RENSPA: ${escapeHtml(item.renspaMasked)}` : ""}</small>${sharedNotice}</div><div class="producer-kpis"><div class="is-priority"><span>${escapeHtml(speciesLabel(selectedSpecies))}</span><strong>${formatNumber.format(selectedSpeciesValue)}</strong></div><div><span>Total general</span><strong>${formatNumber.format(item.totalExistencias)}</strong></div></div><section class="producer-detail-section"><h4>Existencias por especie</h4><div class="producer-bars">${bars}</div></section><section class="producer-detail-section"><h4>Categorías de ${escapeHtml(speciesLabel(selectedSpecies))}</h4><table class="producer-detail-table"><tbody>${categoryRows}</tbody></table></section>`;
+    const identifiers = item.identifiers || {};
+    const person = item.person || {};
+    const identityRows = canShowFullIdentifiers() ? [["Nombre / titular", person.displayName || person.name], ["Razón social", person.legalName], ["RENSPA", identifiers.renspa], ["DNI", identifiers.dni], ["CUIT", identifiers.cuit], ["CUIL", identifiers.cuil], ["Documento", identifiers.document]].filter(([, current]) => String(current || "").trim()).map(([label, current]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(formatIdentifier(current, label))}</td></tr>`).join("") : "";
+    return `<div class="producer-detail-header"><h3>${escapeHtml(item.displayId)}</h3><p>${escapeHtml(location)}</p><small class="producer-detail-id">ID operativo: ${escapeHtml(item.id)}${item.renspaMasked ? ` · RENSPA: ${escapeHtml(formatIdentifier(identifiers.renspa || item.renspaMasked, "renspa"))}` : ""}</small>${sharedNotice}</div>${identityRows ? `<section class="producer-detail-section"><h4>Identificación</h4><table class="producer-detail-table"><tbody>${identityRows}</tbody></table></section>` : ""}<div class="producer-kpis"><div class="is-priority"><span>${escapeHtml(speciesLabel(selectedSpecies))}</span><strong>${formatNumber.format(selectedSpeciesValue)}</strong></div><div><span>Total general</span><strong>${formatNumber.format(item.totalExistencias)}</strong></div></div><section class="producer-detail-section"><h4>Existencias por especie</h4><div class="producer-bars">${bars}</div></section><section class="producer-detail-section"><h4>Categorías de ${escapeHtml(speciesLabel(selectedSpecies))}</h4><table class="producer-detail-table"><tbody>${categoryRows}</tbody></table></section>`;
   }
 
   function renderOperationalFilterChips(state, count) {
@@ -1534,7 +1631,8 @@
         : state.minStock !== null ? `desde ${formatNumber.format(state.minStock)}` : `hasta ${formatNumber.format(state.maxStock)}`;
       labels.splice(labels.length - 1, 0, ["Rango", `${range} cabezas`]);
     }
-    target.innerHTML = `<span class="filter-count">${formatNumber.format(count)} visibles</span>${labels.map(([label, value]) => `<span class="operational-filter-chip">${escapeHtml(label)}: ${escapeHtml(value)}</span>`).join("")}`;
+    if (state.activePolygon?.length) labels.push(["Área dibujada", "Activa"]);
+    target.innerHTML = `<span class="filter-count">${formatNumber.format(count)} visibles${state.activePolygon?.length ? ` · ${formatNumber.format(count)} productores dentro del área` : ""}</span>${labels.map(([label, value]) => `<span class="operational-filter-chip">${escapeHtml(label)}: ${escapeHtml(value)}</span>`).join("")}`;
   }
 
   function showOperationalEmpty(message) {
@@ -1783,9 +1881,15 @@
   }
 
   function pointInPolygon([x, y], vertices) {
+    if (!Array.isArray(vertices) || vertices.length < 3 || !Number.isFinite(x) || !Number.isFinite(y)) return false;
     let inside = false;
     for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
       const [xi, yi] = vertices[i]; const [xj, yj] = vertices[j];
+      // Boundary points are included; this avoids surprising omissions for a
+      // producer whose coordinate falls exactly on a drawn edge or vertex.
+      const cross = (x - xi) * (yj - yi) - (y - yi) * (xj - xi);
+      const onSegment = Math.abs(cross) < 1e-10 && x >= Math.min(xi, xj) - 1e-10 && x <= Math.max(xi, xj) + 1e-10 && y >= Math.min(yi, yj) - 1e-10 && y <= Math.max(yi, yj) + 1e-10;
+      if (onSegment) return true;
       const intersects = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
       if (intersects) inside = !inside;
     }

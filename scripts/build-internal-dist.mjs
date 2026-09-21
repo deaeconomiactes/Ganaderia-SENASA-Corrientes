@@ -215,6 +215,7 @@ function validateInternalConfig(contents) {
     [/APP_MODE\s*:\s*["']internal["']/, "APP_MODE internal"],
     [/PUBLIC_SAFE_MODE\s*:\s*false/, "PUBLIC_SAFE_MODE false"],
     [/INTERNAL_MODE\s*:\s*true/, "INTERNAL_MODE true"],
+    [/SHOW_FULL_IDENTIFIERS\s*:\s*true/, "SHOW_FULL_IDENTIFIERS true"],
     [/SHOW_PRODUCER_POINTS\s*:\s*true/, "SHOW_PRODUCER_POINTS true"],
     [/INTERNAL_PRODUCER_DATA_URL\s*:/, "INTERNAL_PRODUCER_DATA_URL"],
   ];
@@ -247,6 +248,8 @@ function toProducerIndex(record, detailChunkIndex) {
     t: Number(record.totalExistencias || 0),
     e: ["bovinos", "bubalinos", "ovinos", "caprinos", "porcinos", "equinos"].map((key) => Number(record.especies?.[key] || 0)),
     c: Object.entries(record.categorias || {}).filter(([, value]) => Number(value) > 0).map(([key]) => key),
+    h: record.identifiers || {},
+    n: record.person || {},
     x: detailChunkIndex,
   };
 }
@@ -256,6 +259,8 @@ function toProducerDetail(record) {
     id: record.id,
     paraje: record.paraje || "",
     categorias: compactPositiveObject(record.categorias),
+    identifiers: record.identifiers || {},
+    person: record.person || {},
   };
 }
 

@@ -14,10 +14,10 @@ test("normaliza aliases de identificadores y reporta cobertura sin valores", () 
     const output = path.join(directory, "productores.json");
     const report = path.join(directory, "reporte.json");
     writeFileSync(source, [
-      "codigo;renspa;Nro DNI;Nro CUIT;Nro CUIL;Nro Documento;departamento;municipio;latitud;longitud;bovinos",
-      "A-1;R-1;12345678;20123456786;;;Centro;Villa;-28,1;-58,1;10",
-      "A-2;R-2;;;;27123456780;Centro;Villa;-28,2;-58,2;20",
-      "A-3;R-3;;;;87654321;Norte;Pueblo;-28,3;-58,3;30",
+      "codigo;renspa;Nro DNI;Nro CUIT;Nro CUIL;Nro Documento;Nombre Titular;Razón Social;departamento;municipio;latitud;longitud;bovinos",
+      "A-1;R-1;12345678;20123456786;;;Ana Productora;Ganadería Demo SA;Centro;Villa;-28,1;-58,1;10",
+      "A-2;R-2;;;;27123456780;;;Centro;Villa;-28,2;-58,2;20",
+      "A-3;R-3;;;;87654321;;;Norte;Pueblo;-28,3;-58,3;30",
     ].join("\n"), "utf8");
     const result = spawnSync(process.execPath, [
       path.join(projectRoot, "scripts", "build-producer-data.mjs"),
@@ -29,6 +29,8 @@ test("normaliza aliases de identificadores y reporta cobertura sin valores", () 
     assert.equal(payload.records[0].searchKeys.dni, "12345678");
     assert.equal(payload.records[0].searchKeys.cuit, "20123456786");
     assert.equal(payload.records[0].searchKeys.cuit_cuil, "20123456786");
+    assert.deepEqual(payload.records[0].identifiers, { renspa: "R-1", dni: "12345678", cuit: "20123456786", cuil: "", document: "" });
+    assert.deepEqual(payload.records[0].person, { name: "Ana Productora", legalName: "Ganadería Demo SA", displayName: "Ana Productora" });
     assert.equal(payload.records[1].searchKeys.document, "27123456780");
     assert.equal(payload.records[1].searchKeys.cuit_cuil, "27123456780");
     assert.equal(payload.records[2].searchKeys.document, "87654321");
