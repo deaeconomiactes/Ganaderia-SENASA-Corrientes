@@ -19,5 +19,20 @@ window.APP_CONFIG = {
   DEBUG_MAP: false,
   MAP_DEFAULT_VIEW: "auto",
   MAP_PREFERRED_LAYER: "municipality",
+  MAP_BASE_LAYER_DEFAULT: "standard",
+  BASEMAPS: {
+    standard: {
+      label: "Mapa",
+      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      maxZoom: 18,
+      attribution: "© OpenStreetMap contributors",
+    },
+    satellite: {
+      label: "Satélite",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      maxZoom: 19,
+      attribution: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+    },
+  },
   GRID_SIZE: 0.12,
 };
