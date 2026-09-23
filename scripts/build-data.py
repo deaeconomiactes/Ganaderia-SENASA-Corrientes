@@ -64,11 +64,21 @@ def make_row(name, values):
 
 def main():
     workbook = load_workbook(SOURCE, read_only=True, data_only=True)
-    sheet = workbook.active
-    headers = list(next(sheet.values))
+    expected_sheets = ("Agricola", "Ganadero", "Mixto")
+    if any(name in workbook.sheetnames for name in expected_sheets):
+        if not all(name in workbook.sheetnames for name in expected_sheets):
+            raise ValueError("Faltan hojas Agricola, Ganadero o Mixto")
+        sheets = [workbook[name] for name in expected_sheets]
+    else:
+        sheets = [workbook.active]
+    headers = list(next(sheets[0].values))
+    if any(list(next(sheet.values)) != headers for sheet in sheets[1:]):
+        raise ValueError("Las hojas no tienen la misma estructura")
     columns = {name: index for index, name in enumerate(headers)}
 
-    required = {"DEPTO", "MUNI", "OFICINA LOCAL", "LATITUD", "LONGITUD", *SPECIES}
+    department_field = "PARTIDO" if "PARTIDO" in columns else "DEPTO"
+    municipality_field = "LOCALIDAD" if "LOCALIDAD" in columns else "MUNI"
+    required = {department_field, municipality_field, "OFICINA LOCAL", "LATITUD", "LONGITUD", *SPECIES}
     missing = required.difference(columns)
     if missing:
         raise ValueError(f"Faltan columnas requeridas: {', '.join(sorted(missing))}")
@@ -88,10 +98,10 @@ def main():
     invalid_coordinates = 0
     records = 0
 
-    for row in sheet.iter_rows(min_row=2, values_only=True):
+    for row in (row for sheet in sheets for row in sheet.iter_rows(min_row=2, values_only=True)):
         records += 1
-        department = clean_text(row[columns["DEPTO"]])
-        municipality = clean_text(row[columns["MUNI"]])
+        department = clean_text(row[columns[department_field]])
+        municipality = clean_text(row[columns[municipality_field]])
         office = clean_text(row[columns["OFICINA LOCAL"]])
 
         totals["registros"] += 1
@@ -202,6 +212,12 @@ def main():
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    metadata_path = OUTPUT.with_name("metadata.json")
+    if metadata_path.exists():
+        site_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        site_metadata["fuente"] = SOURCE.name
+        site_metadata["actualizado"] = payload["metadata"]["actualizado"]
+        metadata_path.write_text(json.dumps(site_metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"records": records, "grids": len(grid_rows), "departments": len(department_rows), "mapped": valid_coordinates}, ensure_ascii=False))
 
 

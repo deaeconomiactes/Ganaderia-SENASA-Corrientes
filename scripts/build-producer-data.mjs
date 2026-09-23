@@ -15,15 +15,16 @@ const CATEGORY_SCHEMA = {
   equinos: { yeguas: ["yeguas", "yegua"], asnos: ["asnos", "asno"], burros: ["burros", "burro"], mulas: ["mulas", "mula"], padrillos_eq: ["padrilloseq"], potrillos_as: ["potrillosas"], equinos: ["equinos"] },
 };
 const CATEGORY_ALIASES = Object.assign({}, ...Object.values(CATEGORY_SCHEMA));
+const TYPE_BY_SHEET = { agricola: "agricola", ganadero: "ganadero", mixto: "mixto" };
 const args = process.argv.slice(2);
 const sourceArg = args.find((arg) => !arg.startsWith("--"));
 const option = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
-const outputArg = option("--output") || "dist/data/interno/productores.json";
-const reportArg = option("--report") || "dist/data/interno/reporte_productores.json";
+const outputArg = option("--output") || "data/interno/productores.json";
+const reportArg = option("--report") || "data/interno/reporte_productores.json";
 
 if (!sourceArg || args.includes("--help")) {
   console.log("Uso: node scripts/build-producer-data.mjs RUTA_FUENTE [--output RUTA] [--report RUTA]");
-  console.log("Ejemplo: node scripts/build-producer-data.mjs ./data/interno/base_original.xlsx");
+  console.log('Ejemplo: node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"');
   process.exit(sourceArg ? 0 : 2);
 }
 
@@ -34,7 +35,7 @@ if (!existsSync(source)) fail(`No existe la fuente indicada: ${sourceArg}`);
 
 const rows = loadRows(source);
 if (!rows.length) fail("La fuente no contiene filas de datos.");
-const headers = Object.keys(rows[0]);
+const headers = Object.keys(rows[0]).filter((header) => header !== "__sourceSheet");
 const fields = detectFields(headers);
 const required = ["idOrRenspa", "departamento", "municipio", "lat", "lon"];
 const missing = required.filter((field) => !fields[field]);
@@ -46,6 +47,8 @@ const report = {
   sourceFile: path.basename(source),
   outputFile: path.relative(process.cwd(), output),
   rowsRead: rows.length,
+  renspaTypeCoverage: { agricola: 0, ganadero: 0, mixto: 0, total: 0 },
+  sourceSheets: {},
   validProducers: 0,
   withValidCoordinates: 0,
   withoutCoordinates: 0,
@@ -74,9 +77,18 @@ const seenIdentifiers = new Set();
 const seenSearchKeys = Object.fromEntries(Object.keys(report.identifierCoverage).map((type) => [type, new Set()]));
 const records = [];
 rows.forEach((row, index) => {
+  const sourceSheet = cleanValue(row.__sourceSheet);
+  const typeEntry = TYPE_BY_SHEET[canonical(sourceSheet)];
+  if (sourceSheet && !typeEntry) fail(`Hoja de origen no reconocida: ${sourceSheet}`);
+  const tipoRenspa = typeEntry || "ganadero";
+  const tipoRenspaLabel = tipoRenspa === "agricola" ? "Agrícola" : tipoRenspa === "mixto" ? "Mixto" : "Ganadero";
+  const sheetReport = report.sourceSheets[sourceSheet || "Fuente"] ||= { rows: 0, validProducers: 0, coordinateRows: 0, uniqueRenspa: new Set(), duplicateRenspaRows: 0, speciesExistences: Object.fromEntries(SPECIES.map((key) => [key, 0])) };
+  sheetReport.rows += 1;
   const sourceIdentifier = cleanValue(valueAt(row, fields.idOrRenspa));
   const renspa = cleanValue(valueAt(row, fields.renspa));
-  const identifiers = { renspa, dni: cleanValue(valueAt(row, fields.dni)), cuit: cleanValue(valueAt(row, fields.cuit)), cuil: cleanValue(valueAt(row, fields.cuil)), document: cleanValue(valueAt(row, fields.document)) };
+  if (renspa && sheetReport.uniqueRenspa.has(renspa)) sheetReport.duplicateRenspaRows += 1;
+  else if (renspa) sheetReport.uniqueRenspa.add(renspa);
+  const identifiers = { renspa, dni: cleanValue(valueAt(row, fields.dni)), cuit: cleanValue(valueAt(row, fields.cuit)), cuil: cleanValue(valueAt(row, fields.cuil)), cuitCuil: cleanValue(valueAt(row, fields.cuitCuil)), document: cleanValue(valueAt(row, fields.document)) };
   const name = cleanValue(valueAt(row, fields.name));
   const legalName = cleanValue(valueAt(row, fields.legalName));
   const person = { name, legalName, displayName: name || legalName };
@@ -89,13 +101,14 @@ rows.forEach((row, index) => {
   const coordinatesValid = Number.isFinite(lat) && Number.isFinite(lon);
   if (!coordinatesValid) report.withoutCoordinates += 1;
   else report.withValidCoordinates += 1;
+  if (coordinatesValid) sheetReport.coordinateRows += 1;
   const rawNumericValues = [...SPECIES.map((species) => parseNumeric(valueAt(row, fields.species[species]))), ...Object.values(fields.categories).map((field) => parseNumeric(valueAt(row, field)))];
   if (rawNumericValues.some((value) => Number.isFinite(value) && value < 0)) { report.negativeExistenceRows += 1; return; }
-  if (!coordinatesValid) return;
   const values = {
     especies: Object.fromEntries(SPECIES.map((species) => [species, positiveNumber(valueAt(row, fields.species[species]))])),
     categorias: Object.fromEntries(Object.entries(fields.categories).map(([category, field]) => [category, positiveNumber(valueAt(row, field))])),
   };
+  SPECIES.forEach((species) => { sheetReport.speciesExistences[species] += values.especies[species]; });
   const totalExistencias = sum(Object.values(values.especies)) || sum(Object.values(values.categorias));
   if (totalExistencias === 0) report.totalZeroRows += 1;
   const departamento = cleanValue(valueAt(row, fields.departamento));
@@ -103,16 +116,21 @@ rows.forEach((row, index) => {
   if (!sourceIdentifier) { report.missingIdentifierRows += 1; return; }
   if (!departamento || !municipio) { report.missingAdministrativeRows += 1; return; }
   report.validProducers += 1;
+  sheetReport.validProducers += 1;
   report.departments[departamento] = (report.departments[departamento] || 0) + 1;
   const sequence = String(index + 1).padStart(6, "0");
   updateIdentifierCoverage(report.identifierCoverage, searchKeys, seenSearchKeys, true);
   records.push({
     id: `UP-${sequence}`,
+    tipoRenspa,
+    tipoRenspaLabel,
     displayId: renspa ? `RENSPA ${maskIdentifier(renspa)}` : `Unidad operativa ${sequence}`,
     renspaMasked: renspa ? maskIdentifier(renspa) : "",
     searchKeys,
     identifiers,
     person,
+    establecimiento: cleanValue(valueAt(row, fields.establecimiento)),
+    otherData: Object.fromEntries(report.unrecognizedFields.map((field) => [field, cleanValue(row[field])]).filter(([, value]) => value)),
     lat, lon, departamento, municipio,
     oficinaLocal: cleanValue(valueAt(row, fields.oficina)),
     paraje: cleanValue(valueAt(row, fields.paraje)),
@@ -122,10 +140,17 @@ rows.forEach((row, index) => {
   });
 });
 
+for (const [sheetName, sheet] of Object.entries(report.sourceSheets)) {
+  const uniqueRenspa = sheet.uniqueRenspa.size;
+  report.renspaTypeCoverage[canonical(sheetName)] = uniqueRenspa;
+  sheet.uniqueRenspa = uniqueRenspa;
+}
+report.renspaTypeCoverage.total = ["agricola", "ganadero", "mixto"].reduce((total, type) => total + report.renspaTypeCoverage[type], 0);
+
 for (const [type, values] of Object.entries(seenSearchKeys)) report.identifierCoverage[type].distinctValues = values.size;
 
-if (!records.length) report.warnings.push("No se generaron productores válidos con coordenadas, ubicación administrativa e identificador.");
-if (report.withoutCoordinates) report.warnings.push(`${report.withoutCoordinates} filas quedaron fuera por coordenadas inválidas o ausentes.`);
+if (!records.length) report.warnings.push("No se generaron productores con ubicación administrativa e identificador.");
+if (report.withoutCoordinates) report.warnings.push(`${report.withoutCoordinates} filas se conservaron para búsqueda y ficha, pero no pueden mostrarse como puntos por coordenadas inválidas o ausentes.`);
 if (report.negativeExistenceRows) report.warnings.push(`${report.negativeExistenceRows} filas quedaron fuera por existencias negativas.`);
 if (report.totalZeroRows) report.warnings.push(`${report.totalZeroRows} productores válidos tienen existencias totales iguales a cero.`);
 if (report.missingIdentifierRows) report.warnings.push(`${report.missingIdentifierRows} filas con coordenadas no tienen identificador o RENSPA.`);
@@ -177,25 +202,25 @@ function parseCsv(text, explicitDelimiter) {
 
 function detectDelimiter(text) { const firstLine = text.split(/\r?\n/, 1)[0]; return [",", ";", "\t"].sort((a, b) => firstLine.split(b).length - firstLine.split(a).length)[0]; }
 function detectFields(headers) {
-  const find = (aliases) => headers.find((header) => aliases.includes(canonical(header)));
+  const find = (aliases) => aliases.map((alias) => headers.find((header) => canonical(header) === alias)).find(Boolean);
   const speciesAliases = { bovinos: ["bovinos", "bovino", "bov"], bubalinos: ["bubalinos", "bubalino", "bufalos", "bufalo"], ovinos: ["ovinos", "ovino", "ovejas"], caprinos: ["caprinos", "caprino", "cabras"], porcinos: ["porcinos", "porcino", "cerdos"], equinos: ["equinos", "equino", "caballos"] };
   const id = find(["idproductor", "productorid", "idunidad", "unidadid", "idregistro", "registroid", "codigooperativo", "codigo", "id"]);
   const renspa = find(["renspa", "renspanro", "renspanumero", "uprenspa"]);
   const dni = find(["dni", "nrodni", "dninro", "numerodni", "documentoidentidad"]);
   const cuit = find(["cuit", "nrocuit", "cuitnro", "numerocuit"]);
   const cuil = find(["cuil", "nrocuil", "cuilnro", "numerocuil"]);
-  const cuitCuil = find(["cuitcuil", "cuitocuil", "cuitcuilnro", "nrocuitcuil", "numerocuitcuil"]);
+  const cuitCuil = find(["cuitcuil", "cuitocuil", "cuitcuilnro", "nrocuitcuil", "numerocuitcuil", "cuitltitularup"]);
   const document = find(["documento", "documentonro", "documentonumero", "nrodocumento", "numerodocumento", "nrodoc", "numdoc", "titulardocumento", "docproductor"]);
   const name = find(["nombre", "productor", "titular", "nombreproductor", "apellidonombre", "nombreapellido", "nombretitular", "titularproductor", "propietario"]);
   const legalName = find(["razonsocial"]);
   const recognized = new Set([id, renspa, dni, cuit, cuil, cuitCuil, document, name, legalName].filter(Boolean).map(canonical));
   const species = Object.fromEntries(Object.entries(speciesAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
   const categories = Object.fromEntries(Object.entries(CATEGORY_ALIASES).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
-  const fields = { idOrRenspa: id || renspa, id, renspa, dni, cuit, cuil, cuitCuil, document, name, legalName, departamento: find(["departamento", "depto", "dep"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
-  [fields.departamento, fields.municipio, fields.oficina, fields.paraje, fields.lat, fields.lon, ...Object.values(species), ...Object.values(categories)].filter(Boolean).forEach((field) => recognized.add(canonical(field)));
+  const fields = { idOrRenspa: id || renspa, id, renspa, dni, cuit, cuil, cuitCuil, document, name, legalName, establecimiento: find(["establecimiento", "nombreestablecimiento"]), departamento: find(["departamento", "depto", "dep", "partido"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
+  [fields.establecimiento, fields.departamento, fields.municipio, fields.oficina, fields.paraje, fields.lat, fields.lon, ...Object.values(species), ...Object.values(categories)].filter(Boolean).forEach((field) => recognized.add(canonical(field)));
   return fields;
 }
-function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuit: fields.cuit || null, cuil: fields.cuil || null, cuitCuil: fields.cuitCuil || null, document: fields.document || null, name: fields.name || null, legalName: fields.legalName || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories, categoriesBySpecies: Object.fromEntries(Object.entries(CATEGORY_SCHEMA).map(([species, definitions]) => [species, Object.keys(definitions).filter((key) => Boolean(fields.categories[key]))])) }; }
+function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuit: fields.cuit || null, cuil: fields.cuil || null, cuitCuil: fields.cuitCuil || null, document: fields.document || null, name: fields.name || null, legalName: fields.legalName || null, establecimiento: fields.establecimiento || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories, categoriesBySpecies: Object.fromEntries(Object.entries(CATEGORY_SCHEMA).map(([species, definitions]) => [species, Object.keys(definitions).filter((key) => Boolean(fields.categories[key]))])) }; }
 function buildSearchKeys(row, fields, { renspa, sourceIdentifier }) {
   const raw = {
     renspa,

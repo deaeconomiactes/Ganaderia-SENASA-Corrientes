@@ -29,7 +29,7 @@ if (args.includes("--help")) {
   console.log("Uso: node scripts/build-internal-dist.mjs [opciones]");
   console.log("  --source-dir RUTA       Dist público ya construido (default: dist)");
   console.log("  --output RUTA           Carpeta de salida (default: internal-dist)");
-  console.log("  --producer-data RUTA   JSON interno (default: dist/data/interno/productores.json)");
+  console.log("  --producer-data RUTA   JSON interno (default: data/interno/productores.json)");
   console.log("  --producer-report RUTA  Reporte local (opcional)");
   console.log("  --data-url URL          Endpoint interno de productores, si corresponde");
   console.log("  --locator-endpoint URL  Endpoint seguro del localizador, si corresponde");
@@ -38,10 +38,10 @@ if (args.includes("--help")) {
 
 const sourceDist = resolveFromProject(option("--source-dir") || "dist");
 const outputDir = resolveFromProject(option("--output") || "internal-dist");
-const producerData = resolveFromProject(option("--producer-data") || "dist/data/interno/productores.json");
+const producerData = resolveFromProject(option("--producer-data") || "data/interno/productores.json");
 const reportCandidate = option("--producer-report")
   ? resolveFromProject(option("--producer-report"))
-  : resolveFromProject("dist/data/interno/reporte_productores.json");
+  : resolveFromProject("data/interno/reporte_productores.json");
 const dataUrl = option("--data-url");
 const locatorEndpoint = option("--locator-endpoint");
 const internalConfigPath = path.join(projectRoot, "config.internal.js");
@@ -106,7 +106,7 @@ if (dataUrl) {
   const detailManifestPath = path.join(internalDataDir, "productores.detail.manifest.json");
   writeJson(detailManifestPath, { format: "senasa-producers-detail-v2", records: records.length, chunks: publicChunkMeta(detailChunks) });
   const searchIndexPath = path.join(internalDataDir, "search-index.json");
-  writeJson(searchIndexPath, buildSearchIndex(records, detailChunkById));
+  writeJson(searchIndexPath, buildSearchIndex(records));
   const indexManifestPath = path.join(internalDataDir, "productores.index.manifest.json");
   writeJson(indexManifestPath, {
     format: "senasa-producers-index-v2",
@@ -115,6 +115,7 @@ if (dataUrl) {
     detailManifest: "./data/interno/productores.detail.manifest.json",
     detailChunks: detailChunks.map((chunk) => chunk.url),
     species: ["bovinos", "bubalinos", "ovinos", "caprinos", "porcinos", "equinos"],
+    types: ["agricola", "ganadero", "mixto"],
     searchIndex: "./data/interno/search-index.json",
     chunks: publicChunkMeta(indexChunks),
   });
@@ -238,6 +239,7 @@ function verifyOutput() {
 function toProducerIndex(record, detailChunkIndex) {
   return {
     i: record.id,
+    y: record.tipoRenspa || "ganadero",
     d: record.displayId,
     r: record.renspaMasked || "",
     a: roundCoordinate(record.lat),
@@ -257,6 +259,10 @@ function toProducerIndex(record, detailChunkIndex) {
 function toProducerDetail(record) {
   return {
     id: record.id,
+    tipoRenspa: record.tipoRenspa || "ganadero",
+    tipoRenspaLabel: record.tipoRenspaLabel || "Ganadero",
+    establecimiento: record.establecimiento || "",
+    otherData: record.otherData || {},
     paraje: record.paraje || "",
     categorias: compactPositiveObject(record.categorias),
     identifiers: record.identifiers || {},
@@ -264,24 +270,38 @@ function toProducerDetail(record) {
   };
 }
 
-function buildSearchIndex(records, detailChunkById = new Map()) {
-  const indexes = { renspa: {}, cuit: {}, cuil: {}, dni: {}, document: {}, cuit_cuil: {}, internal_id: {} };
+function buildSearchIndex(records) {
+  const indexes = { renspa: {}, cuit: {}, cuil: {}, dni: {}, document: {}, cuit_cuil: {}, internal_id: {}, name: {} };
+  const typesById = {};
   for (const record of records) {
+    typesById[record.id] = record.tipoRenspa || "ganadero";
     for (const [type, rawValue] of Object.entries(record.searchKeys || {})) {
       if (!indexes[type] || !rawValue) continue;
       const value = String(rawValue);
-      const entry = { id: record.id, detailChunk: detailChunkById.get(record.id) ?? null };
+      const entry = record.id;
       const existing = indexes[type][value];
       if (!existing) indexes[type][value] = entry;
       else {
         const entries = Array.isArray(existing) ? existing : [existing];
-        if (!entries.some((current) => current.id === entry.id)) indexes[type][value] = [...entries, entry];
+        if (!entries.includes(entry)) indexes[type][value] = [...entries, entry];
       }
     }
     const internal = String(record.id || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (internal && !indexes.internal_id[internal]) indexes.internal_id[internal] = { id: record.id, detailChunk: detailChunkById.get(record.id) ?? null };
+    if (internal && !indexes.internal_id[internal]) indexes.internal_id[internal] = record.id;
+    const name = String(record.person?.displayName || record.person?.name || record.person?.legalName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 64);
+    if (name) {
+      const entry = record.id;
+      for (const key of new Set([name, ...String(record.person?.displayName || record.person?.name || record.person?.legalName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().split(/[^A-Z0-9]+/).filter((part) => part.length >= 4)])) {
+        const existing = indexes.name[key];
+        if (!existing) indexes.name[key] = entry;
+        else {
+          const entries = Array.isArray(existing) ? existing : [existing];
+          if (!entries.includes(entry)) indexes.name[key] = [...entries, entry];
+        }
+      }
+    }
   }
-  return { format: "senasa-search-index-v1", records: records.length, indexes };
+  return { format: "senasa-search-index-v1", records: records.length, typesById, indexes };
 }
 
 function writeRecordChunks({ records, prefix, maxChunkBytes, internalDataDir }) {
@@ -320,6 +340,7 @@ function compactPositiveObject(value) {
 }
 
 function roundCoordinate(value) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? Number(number.toFixed(5)) : null;
 }

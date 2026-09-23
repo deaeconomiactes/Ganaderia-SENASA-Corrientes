@@ -45,3 +45,14 @@
 .producer-advanced-grid label.is-disabled{opacity:.72}.advanced-filters-grid select:disabled{cursor:not-allowed;border-color:#293c4c;background:#101b27;color:#718694}
 @media(max-width:920px){.advanced-filters-grid{grid-template-columns:minmax(170px,1fr) minmax(260px,1.2fr)}.zero-producers-toggle{grid-column:2;align-self:start}}
 @media(max-width:720px){.advanced-filters-grid{grid-template-columns:1fr;gap:11px}.zero-producers-toggle{grid-column:auto;align-self:stretch}.producer-advanced-filters{grid-column:1/-1}.range-filter-inputs{gap:9px}}
+/* Dimensión principal del modo interno */
+.producer-type-control{grid-column:1/-1;min-width:0;margin:0;padding:0 0 12px;border:0;border-bottom:1px solid #29455b}
+.producer-type-control[hidden]{display:none}
+.producer-type-control legend{margin-bottom:8px;color:#8ea8b8;font-size:.67rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.producer-type-buttons{display:flex;flex-wrap:wrap;gap:7px}
+.producer-type-buttons button{border:1px solid #3b6272;border-radius:999px;background:#142b39;color:#c2d8db;padding:7px 12px;font:700 .72rem/1.2 Inter,ui-sans-serif,system-ui,sans-serif;cursor:pointer}
+.producer-type-buttons button[aria-pressed="true"]{border-color:#46c6b5;background:#174646;color:#e3fff8}
+.producer-type-buttons button:hover,.producer-type-buttons button:focus-visible{outline:2px solid #67d9ca;outline-offset:2px}
+.producer-type-badge{display:inline-flex;align-items:center;width:max-content;margin:4px 0;padding:3px 8px;border-radius:999px;font-size:.65rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:#174646;color:#98eee2}
+.producer-type-badge.type-mixto{background:#4a3820;color:#f4cc80}
+.producer-type-badge.type-agricola{background:#244333;color:#a7e3af}
