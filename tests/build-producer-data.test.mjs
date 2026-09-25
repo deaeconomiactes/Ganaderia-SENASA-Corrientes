@@ -7,6 +7,37 @@ import test from "node:test";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 
+test("clasifica tres hojas por origen aunque Mixto declare n/a y conserva Agrícola sin ganado", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "senasa-types-"));
+  try {
+    const source = path.join(directory, "source.xlsx");
+    const output = path.join(directory, "productores.json");
+    const report = path.join(directory, "reporte.json");
+    const createWorkbook = spawnSync("python", ["-c", `
+import openpyxl, sys
+w = openpyxl.Workbook()
+w.remove(w.active)
+headers = ["UP_RENSPA", "PARTIDO", "LOCALIDAD", "OFICINA LOCAL", "LATITUD", "LONGITUD", "BOVINOS", "TIPO_EXPLOTACION_ACTUAL"]
+for name, renspa, stock, declared in [("Agricola", "A-1", 0, "A"), ("Ganadero", "G-1", 10, "G"), ("Mixto", "M-1", 0, "n/a")]:
+    sheet = w.create_sheet(name)
+    sheet.append(headers)
+    sheet.append([renspa, "Centro", "Villa", "Oficina", -28.1, -58.1, stock, declared])
+w.save(sys.argv[1])
+`, source], { cwd: projectRoot, encoding: "utf8" });
+    assert.equal(createWorkbook.status, 0, createWorkbook.stderr);
+    const result = spawnSync(process.execPath, [path.join(projectRoot, "scripts", "build-producer-data.mjs"), source, "--output", output, "--report", report], { cwd: projectRoot, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    const records = JSON.parse(readFileSync(output, "utf8")).records;
+    assert.deepEqual(records.map((row) => row.tipoRenspa), ["agricola", "ganadero", "mixto"]);
+    assert.deepEqual(records.map((row) => row.tipoRenspaLabel), ["Agrícola", "Ganadero", "Mixto"]);
+    assert.equal(records[0].totalExistencias, 0);
+    assert.equal(records[2].totalExistencias, 0);
+    assert.deepEqual(JSON.parse(readFileSync(report, "utf8")).renspaTypeCoverage, { agricola: 1, ganadero: 1, mixto: 1, total: 3 });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("normaliza aliases de identificadores y reporta cobertura sin valores", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "senasa-identifiers-"));
   try {
@@ -29,7 +60,7 @@ test("normaliza aliases de identificadores y reporta cobertura sin valores", () 
     assert.equal(payload.records[0].searchKeys.dni, "12345678");
     assert.equal(payload.records[0].searchKeys.cuit, "20123456786");
     assert.equal(payload.records[0].searchKeys.cuit_cuil, "20123456786");
-    assert.deepEqual(payload.records[0].identifiers, { renspa: "R-1", dni: "12345678", cuit: "20123456786", cuil: "", document: "" });
+    assert.deepEqual(payload.records[0].identifiers, { renspa: "R-1", dni: "12345678", cuit: "20123456786", cuil: "", cuitCuil: "", document: "" });
     assert.deepEqual(payload.records[0].person, { name: "Ana Productora", legalName: "Ganadería Demo SA", displayName: "Ana Productora" });
     assert.equal(payload.records[1].searchKeys.document, "27123456780");
     assert.equal(payload.records[1].searchKeys.cuit_cuil, "27123456780");
@@ -74,10 +105,13 @@ test("el índice interno conserva multi-match y referencia el fragmento de detal
     assert.equal(result.status, 0, result.stderr);
 
     const index = JSON.parse(readFileSync(path.join(output, "data", "interno", "search-index.json"), "utf8"));
-    assert.deepEqual(Object.keys(index.indexes), ["renspa", "cuit", "cuil", "dni", "document", "cuit_cuil", "internal_id"]);
+    assert.deepEqual(Object.keys(index.indexes), ["renspa", "cuit", "cuil", "dni", "document", "cuit_cuil", "internal_id", "name"]);
     assert.equal(index.indexes.dni["11223344"].length, 2);
-    assert.deepEqual(index.indexes.dni["11223344"].map((entry) => entry.id), ["UP-1", "UP-2"]);
-    assert.ok(index.indexes.dni["11223344"].every((entry) => Number.isInteger(entry.detailChunk)));
+    assert.deepEqual(index.indexes.dni["11223344"], ["UP-1", "UP-2"]);
+    assert.equal(index.typesById["UP-1"], "ganadero");
+    const manifest = JSON.parse(readFileSync(path.join(output, "data", "interno", "productores.index.manifest.json"), "utf8"));
+    const mapIndex = JSON.parse(readFileSync(path.join(output, manifest.chunks[0].url), "utf8"));
+    assert.ok(mapIndex.every((entry) => Number.isInteger(entry.x)));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

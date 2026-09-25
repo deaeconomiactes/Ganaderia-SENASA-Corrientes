@@ -14,11 +14,11 @@ Este documento describe el flujo recomendado para entregar el mapa operativo a u
 Desde la raíz `senasa-dashboard/`, el administrador coloca la fuente original en una ubicación local ignorada y ejecuta:
 
 ```powershell
-node scripts/build-producer-data.mjs "./data/interno/Existencia Corrientes 7-9.xlsx"
+node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"
 node scripts/build-internal-dist.mjs
 ```
 
-El primer comando genera, sin imprimir identificadores, `dist/data/interno/productores.json` y `dist/data/interno/reporte_productores.json`. El segundo comando crea una carpeta separada:
+El primer comando genera, sin imprimir identificadores, `data/interno/productores.json` y `data/interno/reporte_productores.json`. El segundo comando crea una carpeta separada:
 
 ```text
 internal-dist/

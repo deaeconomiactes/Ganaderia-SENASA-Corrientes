@@ -17,15 +17,16 @@ El repositorio mantiene dos plantillas separadas. GitHub Pages siempre genera `d
 
 ## Fuente y alcance
 
-- Fuente declarada: `Existencia Corrientes 7-9.xlsx`.
+- Fuente declarada: `SENASA 09_26 agricolas ganaderos y mixtos.xlsx`.
 - El artefacto público es `dist/data/senasa-corrientes.json`, generado con agregación territorial.
+- Se regenera con `python scripts/build-data.py "data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx" "dist/data/senasa-corrientes.json"`; el script actualiza también `dist/data/metadata.json`.
 - Niveles: provincia, departamento, municipio/oficina local y grilla aproximada de 0,12°.
 - Umbral público vigente: mínimo de 5 registros por unidad publicada. Las unidades menores se suprimen durante la generación del JSON.
 - Los totales/KPIs públicos se calculan sobre las unidades publicadas después de la supresión; no permiten inferir existencias suprimidas.
 - La fuente no informa fecha de corte; el tablero lo muestra como advertencia y no infiere evolución temporal.
 - La fecha de actualización del dashboard se mantiene explícita en `dist/config.js`, separada de la fecha de actualización de la fuente.
 
-La auditoría interna de `Existencia Corrientes 7-9.xlsx` identificó aproximadamente 67.457 filas de unidad/UP_RENSPA, 67.351 coordenadas plausibles, 106 coordenadas inválidas, 26 departamentos, 246 municipios y 28 oficinas locales. La fuente contiene identificadores, titularidad, documentos, contactos y coordenadas; por eso no se copia al build público ni al repositorio. No contiene un campo explícito de estado que permita afirmar por sí solo qué unidad es un “productor efectivo”; el modo interno debe aplicar esa regla de negocio antes de mostrar puntos.
+La auditoría de `SENASA 09_26 agricolas ganaderos y mixtos.xlsx` cuenta 67.574 filas y 67.570 RENSPA únicos: Agrícola 9.695, Ganadero 52.011 y Mixto 5.864. Hay cuatro filas con RENSPA repetido dentro de su hoja y 106 filas sin coordenadas utilizables para el mapa. La fuente contiene identificadores, titularidad, documentos, contactos y coordenadas; por eso no se copia al build público ni al repositorio. Las cuatro filas repetidas se conservan para revisión; el KPI de RENSPA visibles cuenta claves distintas, mientras el mapa muestra las filas georreferenciadas.
 
 ## Capas cartográficas y lectura del mapa
 
@@ -44,30 +45,30 @@ El repositorio y GitHub Pages no deben contener el XLSX original, RENSPA, DNI, C
 
 ## Modo interno operativo
 
-El mapa operativo usa Leaflet y representa unidades productivas como puntos, con clusters inspectables, filtros primarios por especie ganadera/departamento/municipio/oficina y un bloque avanzado (categoría, rango de existencias e inclusión de ceros). El rango se aplica a la categoría seleccionada cuando corresponde; en su defecto, a la especie activa, y sólo usa el total general cuando no hay especie seleccionada. Todos los flujos llaman a `selectProducer()`; la capa `selectedProducerLayer` queda por encima de clusters y puntos normales, centra el mapa, abre el popup y actualiza la ficha. El ranking, el localizador interno y los puntos del mapa comparten la misma selección: al seleccionar una fila se centra el mapa, se resalta el marcador y se abre la ficha desagregada. El control propio **Mapa / Satélite** alterna entre OpenStreetMap y Esri World Imagery, preserva el estado de Leaflet y recuerda la elección como `senasaBasemap` en el almacenamiento local cuando está disponible. La base pública no contiene esos registros; el artefacto interno se configura una sola vez por el administrador y el jefe sólo recibe el enlace protegido.
+El mapa operativo usa Leaflet y representa unidades productivas como puntos, con clusters inspectables, filtro principal multiselección por tipo de RENSPA y filtros por especie ganadera/departamento/municipio/oficina y un bloque avanzado (categoría y rango de existencias). Los productores con total declarado igual a cero y coordenadas válidas aparecen en el mapa, incluso cuando se selecciona una especie; se distinguen mediante un marcador gris con «0». Una categoría seleccionada o un mínimo de existencias mayor que cero puede excluirlos. El rango se aplica a la categoría seleccionada cuando corresponde; en su defecto, a la especie activa, y sólo usa el total general cuando no hay especie seleccionada. Todos los flujos llaman a `selectProducer()`; la capa `selectedProducerLayer` queda por encima de clusters y puntos normales, centra el mapa, abre el popup y actualiza la ficha. El ranking, el localizador interno y los puntos del mapa comparten la misma selección: al seleccionar una fila se centra el mapa, se resalta el marcador y se abre la ficha desagregada. El control propio **Mapa / Satélite** alterna entre OpenStreetMap y Esri World Imagery, preserva el estado de Leaflet y recuerda la elección como `senasaBasemap` en el almacenamiento local cuando está disponible. La base pública no contiene esos registros; el artefacto interno se configura una sola vez por el administrador y el jefe sólo recibe el enlace protegido.
 
 Para probar una copia local controlada, el administrador ejecuta `node scripts/build-producer-data.mjs` y luego `node scripts/build-internal-dist.mjs`, y sirve `internal-dist/`. Esto no debe hacerse sobre el artefacto que se subirá a GitHub Pages. Las coordenadas co-localizadas deben validarse y agruparse antes de uso operativo; no se afirma que sean precisión predial sin metadata de origen.
 
 Si la fuente interna no está configurada, el mapa muestra la base cartográfica de Corrientes con el aviso “Modo interno preparado” y el mensaje “No se encontró la fuente interna de productores. Contacte al administrador del dashboard.” Si Leaflet falla, el contenedor muestra “No se pudo cargar el mapa” en lugar de quedar blanco. Para diagnóstico temporal puede activarse `DEBUG_MAP: true`; los logs sólo informan estado, conteos y cantidad de coordenadas válidas, nunca identificadores. En modo interno no se muestra el selector “Vista pública”: la vista prioriza especie ganadera y ubicación administrativa, mientras que “Filtros avanzados” permanece cerrado hasta que se necesite.
 
-El contrato de normalización acepta un array o `{ "records": [...] }` y detecta aliases como `UP_RENSPA`, `LATITUD`, `LONGITUD`, `DEPTO`, `MUNI`, `OFICINA LOCAL`, totales por especie y categorías ganaderas. El identificador se muestra enmascarado; nunca se renderiza titularidad, DNI, CUIT/CUIL, contacto o dirección.
+El contrato de normalización acepta un array o `{ "records": [...] }` y detecta aliases como `UP_RENSPA`, `LATITUD`, `LONGITUD`, `DEPTO`, `MUNI`, `OFICINA LOCAL`, totales por especie y categorías ganaderas. El modo público no renderiza registros individuales. La ficha interna protegida muestra identificación y demás datos de la fuente únicamente con la configuración interna autorizada.
 
 ## Pipeline local de productores
 
-La base original debe colocarse en una ruta local ignorada, por ejemplo `data/interno/base_original.xlsx` o `data/interno/base_original.csv`. El transformador no imprime filas ni identificadores; genera el archivo que consume el artefacto interno y un reporte local:
+La base actual debe colocarse en `data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx`, una ruta ignorada por Git. El transformador no imprime filas ni identificadores; genera el archivo que consume el artefacto interno y un reporte local:
 
 ```powershell
-node scripts/build-producer-data.mjs "./data/interno/base_original.xlsx"
+node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"
 ```
 
 Salidas predeterminadas:
 
-- `dist/data/interno/productores.json`: registros operativos normalizados para el mapa.
-- `dist/data/interno/reporte_productores.json`: conteos, campos detectados, departamentos, advertencias y exclusiones.
+- `data/interno/productores.json`: registros operativos normalizados para el mapa.
+- `data/interno/reporte_productores.json`: conteos, campos detectados, departamentos, advertencias y exclusiones.
 
 También se admite `--output` y `--report`. Para XLSX se usa el lector local `scripts/read-xlsx-json.py` y `openpyxl`; para CSV/TSV se utiliza el parser incluido, sin instalar dependencias de frontend. Las columnas críticas son identificador o RENSPA, departamento, municipio, latitud y longitud, además de al menos una especie o categoría ganadera. No se inventan columnas ni coordenadas.
 
-El pipeline descarta filas sin coordenadas válidas, con existencias negativas o sin identificación/ubicación administrativa. Conserva los ceros como advertencia, enmascara RENSPA y nunca copia DNI, CUIT, CUIL, titularidad o contactos al JSON de salida. La fuente original, `productores.json` y el reporte no deben subirse al repositorio público.
+El pipeline conserva filas sin coordenadas para búsqueda y ficha protegidas, pero no las muestra como puntos. Excluye filas con existencias negativas o sin identificación/ubicación administrativa. Conserva los ceros; los datos personales sólo quedan en JSON internos protegidos. La fuente original, `productores.json` y el reporte no deben subirse al repositorio público.
 
 Si ya existe un `productores.json` generado con una versión anterior del
 pipeline, volver a ejecutarlo para incorporar `searchKeys` y habilitar la
@@ -95,7 +96,7 @@ Todas las rutas del sitio son relativas (`./data`, `./config.js`, `./app.js`), p
 
 ## Despliegue interno protegido
 
-1. Generar `productores.json` y `reporte_productores.json` en una máquina administrativa con `node scripts/build-producer-data.mjs "./data/interno/base_original.xlsx"`.
+1. Generar `productores.json` y `reporte_productores.json` en una máquina administrativa con `node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"`.
 2. Ejecutar `node scripts/build-internal-dist.mjs` (o `npm run build:internal`) para crear `internal-dist/`. La carpeta contiene `config.js` interno, la aplicación, Leaflet, un índice liviano fragmentado para mapa/filtros, detalle fragmentado bajo demanda y un índice protegido de búsqueda; está excluida de Git.
 3. Publicar **sólo `internal-dist/`** en Vercel, Netlify o un servidor institucional con autenticación/RBAC. Las instrucciones completas de protección están en [`DEPLOY_INTERNAL.md`](./DEPLOY_INTERNAL.md).
 4. Si se usa una API, pasar `--data-url` y `--locator-endpoint` al generador. Nunca subir el XLSX original, el JSON interno ni `internal-dist/` al repositorio público.

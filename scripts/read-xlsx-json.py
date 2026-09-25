@@ -37,18 +37,32 @@ def main() -> int:
         return 3
     try:
         workbook = openpyxl.load_workbook(source, read_only=True, data_only=True)
-        sheet = workbook[workbook.sheetnames[0]]
-        rows = sheet.iter_rows(values_only=True)
-        headers = next(rows, None)
-        if not headers:
-            print("El XLSX no contiene una fila de cabeceras.", file=sys.stderr)
+        expected_sheets = ("Agricola", "Ganadero", "Mixto")
+        source_sheets = [name for name in expected_sheets if name in workbook.sheetnames]
+        if source_sheets and len(source_sheets) != len(expected_sheets):
+            print("Faltan hojas requeridas: Agricola, Ganadero y Mixto.", file=sys.stderr)
             return 4
-        clean_headers = [str(value or "").strip() for value in headers]
+        if not source_sheets:
+            source_sheets = [workbook.sheetnames[0]]
         payload = []
-        for values in rows:
-            row = {header: json_value(value) for header, value in zip(clean_headers, values) if header}
-            if any(value not in (None, "") for value in row.values()):
-                payload.append(row)
+        expected_headers = None
+        for sheet_name in source_sheets:
+            sheet = workbook[sheet_name]
+            rows = sheet.iter_rows(values_only=True)
+            headers = next(rows, None)
+            if not headers:
+                print(f"La hoja {sheet_name} no contiene una fila de cabeceras.", file=sys.stderr)
+                return 4
+            clean_headers = [str(value or "").strip() for value in headers]
+            if expected_headers is not None and clean_headers != expected_headers:
+                print(f"La estructura de la hoja {sheet_name} difiere de las demás.", file=sys.stderr)
+                return 4
+            expected_headers = clean_headers
+            for values in rows:
+                row = {header: json_value(value) for header, value in zip(clean_headers, values) if header}
+                if any(value not in (None, "") for value in row.values()):
+                    row["__sourceSheet"] = sheet_name
+                    payload.append(row)
         json.dump(payload, sys.stdout, ensure_ascii=False, separators=(",", ":"))
         return 0
     except Exception as error:  # pragma: no cover - surfaced as a concise CLI error
