@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="./executive-upgrade.css" />
     <link rel="stylesheet" href="./filter-upgrade.css" />
     <link rel="stylesheet" href="./bi-upgrade.css?v=20260911" />
-    <link rel="stylesheet" href="./operational-map.css?v=20260923-renspa-type" />
+    <link rel="stylesheet" href="./operational-map.css?v=20260925-ranking-scroll" />
     <link rel="stylesheet" href="./vendor/leaflet/leaflet.css" />
   </head>
   <body data-shell="admin" data-page="dashboard" data-view="territorio">
@@ -125,7 +125,7 @@
           <section id="selectionInsight" class="selection-insight" aria-live="polite"><div><p class="eyebrow">ÁREA DE CONSULTA</p><h3>Delimite un polígono sobre el mapa</h3><p>Los resultados se calculan sobre grillas territoriales agregadas, no sobre ubicaciones exactas de establecimientos.</p></div></section>
           <footer class="map-footer"><span id="mapFooterNotice">Grillas de aprox. 0,12°; se excluyen coordenadas exactas para preservar confidencialidad.</span><span id="selectedSummary">—</span></footer>
         </article>
-        <aside class="card panel focus-panel"><div class="panel-header"><div><p id="focusEyebrow" class="eyebrow">FOCOS PRIORITARIOS</p><h2 id="focusTitle">Zonas a observar</h2></div><button id="closeProducerDetailButton" class="map-tool-button" type="button" hidden>Volver al resumen</button></div><div id="internalModeNotice" class="internal-mode-notice" hidden></div><div id="focusList" class="focus-list" aria-live="polite"></div><div id="producerDetail" class="producer-detail" aria-live="polite" hidden></div><div id="focusFootnote" class="panel-footnote">Ordenado por existencias de la especie seleccionada.</div></aside>
+        <aside class="card panel focus-panel"><div class="panel-header ranking-header"><div><p id="focusEyebrow" class="eyebrow">FOCOS PRIORITARIOS</p><h2 id="focusTitle">Zonas a observar</h2></div><button id="closeProducerDetailButton" class="map-tool-button" type="button" hidden>Volver al resumen</button></div><div id="internalModeNotice" class="internal-mode-notice" hidden></div><div id="focusList" class="focus-list ranking-scroll" aria-live="polite"></div><div id="producerDetail" class="producer-detail" aria-live="polite" hidden></div><div id="focusFootnote" class="panel-footnote">Ordenado por existencias de la especie seleccionada.</div></aside>
       </section>
       <section class="card panel table-panel"><div class="panel-header"><div><p class="eyebrow">RESUMEN TERRITORIAL</p><h2>Productores visibles por municipio y oficina</h2></div><div class="table-summary" id="tableSummary">—</div></div><div class="table-scroll"><table aria-label="Resumen territorial de productores"><thead id="municipalityTableHead"><tr><th>Departamento</th><th>Municipio</th><th>Oficina local</th><th class="numeric">Productores visibles</th><th class="numeric">Existencias</th><th class="numeric">Promedio</th><th class="numeric">Participación</th></tr></thead><tbody id="municipalityRows"></tbody></table></div></section>
     </main>
@@ -136,6 +136,6 @@
     <script src="./config.js?v=20260923-renspa-type"></script>
     <script>performance.mark("senasa-config-end")</script>
     <script src="./vendor/leaflet/leaflet.js"></script>
-    <script src="./app.js?v=20260923-renspa-type"></script>
+    <script src="./app.js?v=20260925-ranking-scroll"></script>
   </body>
 </html>
