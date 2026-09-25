@@ -1682,18 +1682,16 @@
     const list = $("#focusList"), detail = $("#producerDetail"), close = $("#closeProducerDetailButton");
     const selectedProducer = state.selectedProducer || state.selected;
     if (selectedProducer && APP_CONFIG.ENABLE_PRODUCER_DETAIL !== false) {
-      list.hidden = true; detail.hidden = false; close.hidden = false;
-      close.textContent = state.expandedCluster ? "Volver al grupo" : "Volver al resumen";
+      list.hidden = false; detail.hidden = false; close.hidden = false;
+      close.textContent = "Cerrar ficha";
       detail.innerHTML = producerDetailMarkup(selectedProducer, { sharedCount: sameCoordinateCount(selectedProducer, state), species: state.filters.species, categories: state.availableCategories || [], loading: state.detailLoadingId === selectedProducer.id, error: state.detailErrorId === selectedProducer.id });
-      setText("#focusEyebrow", String(state.selectionSource || "").startsWith("search") ? "PRODUCTOR LOCALIZADO" : "FICHA OPERATIVA"); setText("#focusTitle", "Detalle de unidad"); setText("#focusFootnote", "Información interna desagregada. No compartir ni publicar sin autorización.");
-      return;
     }
-    if (selectedProducer) {
+    if (selectedProducer && APP_CONFIG.ENABLE_PRODUCER_DETAIL === false) {
       list.hidden = false; detail.hidden = true; close.hidden = true;
       list.innerHTML = "<p class=\"empty-panel-message\">El detalle individual está deshabilitado en esta configuración.</p>";
       return;
     }
-    detail.hidden = true; list.hidden = false; close.hidden = true;
+    if (!selectedProducer) { detail.hidden = true; list.hidden = false; close.hidden = true; }
     if ((state.clusterSelection && state.clusterSelection.length) || (state.locatorMatches && state.locatorMatches.length)) {
       const matches = state.locatorMatches || state.clusterSelection;
       const isSearch = Boolean(state.locatorMatches);
@@ -1704,14 +1702,25 @@
       setText("#focusFootnote", "Seleccione una fila para centrar el mapa y abrir la ficha desagregada.");
       list.innerHTML = `<p class="cluster-summary">${isSearch ? `Coincidencias encontradas en la fuente interna. ${formatNumber.format(matches.length)} resultado(s).` : `Grupo expandido: ${formatNumber.format(matches.length)} productores en esta ubicación o zona cercana. Seleccione un productor para ver su ficha desagregada.`}</p>${matches.slice(0, 20).map((item, index) => `<button class="ranking-item operational-focus-row cluster-list-item" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio, item.oficinaLocal].filter(Boolean).join(" · ") || "Ubicación no informada")}</small><small class="ranking-species">${isSearch && item.locatorMatchTypes?.length ? `${escapeHtml(item.locatorMatchTypes.map((value) => ({ dni: "DNI", cuit: "CUIT", cuil: "CUIL", cuit_cuil: "CUIT/CUIL", document: "DOCUMENTO" })[value] || value).join(" / "))} · ${escapeHtml(item.locatorMaskedIdentifier || "Identificador enmascarado")}` : escapeHtml(speciesLabel(dominantProducerSpecies(item)))}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em><small class="ranking-total">${formatNumber.format(item.totalExistencias)} total</small></span></button>`).join("")}${matches.length > 20 ? `<p class="cluster-summary">Se muestran las primeras 20 de ${formatNumber.format(matches.length)} coincidencias.</p>` : ""}`;
       list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = matches.find((row) => row.id === button.dataset.producerId); if (item) selectProducer(item, { state, source: isSearch ? "search-result-list" : "cluster-list", ensureVisible: isSearch }); }));
+      scrollSelectedRankingRow(list, selectedProducer);
       return;
     }
-    setText("#focusEyebrow", "RANKING OPERATIVO"); setText("#focusTitle", "Unidades destacadas"); setText("#focusFootnote", "Seleccione un productor en el mapa para consultar su ficha operativa.");
+    setText("#focusEyebrow", "RANKING OPERATIVO"); setText("#focusTitle", "Unidades destacadas"); setText("#focusFootnote", selectedProducer ? "Información interna desagregada. No compartir ni publicar sin autorización." : "Seleccione un productor en el mapa para consultar su ficha operativa.");
     const rankingStarted = performance.now();
-    const ranked = topProducers(rows, 10, state.filters.species);
+    const ranked = topProducers(rows, 100, state.filters.species);
     list.innerHTML = ranked.length ? ranked.map((item, index) => `<button class="ranking-item operational-focus-row" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em></span></button>`).join("") : "<p class=\"empty-panel-message\">No hay productores visibles para los filtros seleccionados.</p>";
     perfLog("render de ranking", rankingStarted, `${ranked.length} filas`);
     list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = rows.find((row) => row.id === button.dataset.producerId); if (item) selectProducer(item, { state, source: "ranking" }); }));
+    scrollSelectedRankingRow(list, selectedProducer);
+  }
+
+  function scrollSelectedRankingRow(list, selectedProducer) {
+    if (!selectedProducer) return;
+    const row = Array.from(list.querySelectorAll("[data-producer-id]")).find((button) => button.dataset.producerId === selectedProducer.id);
+    if (!row) return;
+    row.classList.add("is-selected");
+    row.setAttribute("aria-current", "true");
+    row.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest", container: "nearest" });
   }
 
   function topProducers(rows, limit, species) {
