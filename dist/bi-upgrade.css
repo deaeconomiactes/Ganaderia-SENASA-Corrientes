@@ -225,4 +225,11 @@ tbody tr:hover{background:rgba(60,167,159,.045)}
 .analysis-validity-rows { display: grid; gap: 10px; padding: 16px 20px 20px; }
 .analysis-validity-row { display: grid; grid-template-columns: minmax(120px, 1fr) 120px 120px 75px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
 .analysis-validity-row strong { color: #115e59; }
+/* Sólo los controles nuevos de tipo/vigencia; mismo lenguaje del mapa operativo. */
+.analysis-filters .producer-type-control{grid-column:1/-1;min-width:0;margin:0;padding:0 0 12px;border:0;border-bottom:1px solid #29455b}
+.analysis-filters .producer-type-control legend{margin-bottom:8px;color:#8ea8b8;font-size:.67rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.analysis-filters .producer-type-buttons{display:flex;flex-wrap:wrap;gap:7px}
+.analysis-filters .producer-type-buttons button{border:1px solid #3b6272;border-radius:999px;background:#142b39;color:#c2d8db;padding:7px 12px;font:700 .72rem/1.2 Inter,ui-sans-serif,system-ui,sans-serif;cursor:pointer}
+.analysis-filters .producer-type-buttons button[aria-pressed="true"]{border-color:#46c6b5;background:#174646;color:#e3fff8}
+.analysis-filters .producer-type-buttons button:hover,.analysis-filters .producer-type-buttons button:focus-visible{outline:2px solid #67d9ca;outline-offset:2px}
 @media (max-width: 640px) { .analysis-validity-row { grid-template-columns: minmax(100px, 1fr) 65px 65px; } .analysis-validity-row em { display: none; } }

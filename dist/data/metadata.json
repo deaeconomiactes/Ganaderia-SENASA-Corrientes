@@ -1,8 +1,8 @@
 {
-  "fuente": "SENASA 09_26 agricolas ganaderos y mixtos.xlsx",
+  "fuente": "SENASA_Ctes.xlsx",
   "provincia": "Corrientes",
   "fecha_corte": null,
-  "actualizado": "2026-09-23T13:21:29Z",
+  "actualizado": "2026-10-01T14:31:54Z",
   "alcance": "Existencias registradas en la base provista; el período no se especifica en el archivo.",
   "nivel_agregacion": "Provincia, departamento, municipio/oficina local y grilla territorial de aproximadamente 0,12°.",
   "min_registros_publicos": 5,
