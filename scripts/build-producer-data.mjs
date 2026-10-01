@@ -21,10 +21,16 @@ const sourceArg = args.find((arg) => !arg.startsWith("--"));
 const option = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
 const outputArg = option("--output") || "data/interno/productores.json";
 const reportArg = option("--report") || "data/interno/reporte_productores.json";
+const referenceDate = option("--reference-date") || (() => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Argentina/Buenos_Aires", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date()).map(({ type, value }) => [type, value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+})();
+if (!isCalendarDate(referenceDate)) fail("--reference-date debe tener formato YYYY-MM-DD y ser una fecha válida.");
+const cutoffDate = shiftCalendarDate(referenceDate, -365);
 
 if (!sourceArg || args.includes("--help")) {
-  console.log("Uso: node scripts/build-producer-data.mjs RUTA_FUENTE [--output RUTA] [--report RUTA]");
-  console.log('Ejemplo: node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"');
+  console.log("Uso: node scripts/build-producer-data.mjs RUTA_FUENTE [--output RUTA] [--report RUTA] [--reference-date YYYY-MM-DD]");
+  console.log('Ejemplo: node scripts/build-producer-data.mjs "./data/interno/SENASA_Ctes.xlsx"');
   process.exit(sourceArg ? 0 : 2);
 }
 
@@ -37,7 +43,7 @@ const rows = loadRows(source);
 if (!rows.length) fail("La fuente no contiene filas de datos.");
 const headers = Object.keys(rows[0]).filter((header) => header !== "__sourceSheet");
 const fields = detectFields(headers);
-const required = ["idOrRenspa", "departamento", "municipio", "lat", "lon"];
+const required = ["idOrRenspa", "departamento", "municipio", "lat", "lon", "ultimaActualizacion"];
 const missing = required.filter((field) => !fields[field]);
 if (missing.length) fail(`Faltan columnas críticas: ${missing.join(", ")}. Revise las cabeceras reales de la base.`);
 if (!Object.keys(fields.species).length && !Object.keys(fields.categories).length) fail("No se detectó ninguna columna de especie o categoría ganadera. La base no puede alimentar el mapa operativo.");
@@ -48,6 +54,12 @@ const report = {
   outputFile: path.relative(process.cwd(), output),
   rowsRead: rows.length,
   renspaTypeCoverage: { agricola: 0, ganadero: 0, mixto: 0, total: 0 },
+  validityCoverage: { total: 0, vigente: 0, noVigente: 0, sinFecha: 0, fechaFutura: 0 },
+  validityReferenceDate: referenceDate,
+  validityWindowDays: 365,
+  validityCutoffDate: cutoffDate,
+  ultimaActualizacionMin: null,
+  ultimaActualizacionMax: null,
   sourceSheets: {},
   validProducers: 0,
   withValidCoordinates: 0,
@@ -118,12 +130,25 @@ rows.forEach((row, index) => {
   report.validProducers += 1;
   sheetReport.validProducers += 1;
   report.departments[departamento] = (report.departments[departamento] || 0) + 1;
+  const ultimaActualizacionISO = parseUpdateDate(valueAt(row, fields.ultimaActualizacion));
+  report.validityCoverage.total += 1;
+  if (!ultimaActualizacionISO) {
+    report.validityCoverage.noVigente += 1;
+    report.validityCoverage.sinFecha += 1;
+  } else {
+    if (!report.ultimaActualizacionMin || ultimaActualizacionISO < report.ultimaActualizacionMin) report.ultimaActualizacionMin = ultimaActualizacionISO;
+    if (!report.ultimaActualizacionMax || ultimaActualizacionISO > report.ultimaActualizacionMax) report.ultimaActualizacionMax = ultimaActualizacionISO;
+    if (ultimaActualizacionISO > referenceDate) report.validityCoverage.fechaFutura += 1;
+    if (ultimaActualizacionISO >= cutoffDate) report.validityCoverage.vigente += 1;
+    else report.validityCoverage.noVigente += 1;
+  }
   const sequence = String(index + 1).padStart(6, "0");
   updateIdentifierCoverage(report.identifierCoverage, searchKeys, seenSearchKeys, true);
   records.push({
     id: `UP-${sequence}`,
     tipoRenspa,
     tipoRenspaLabel,
+    ultimaActualizacionISO,
     displayId: renspa ? `RENSPA ${maskIdentifier(renspa)}` : `Unidad operativa ${sequence}`,
     renspaMasked: renspa ? maskIdentifier(renspa) : "",
     searchKeys,
@@ -156,6 +181,8 @@ if (report.totalZeroRows) report.warnings.push(`${report.totalZeroRows} producto
 if (report.missingIdentifierRows) report.warnings.push(`${report.missingIdentifierRows} filas con coordenadas no tienen identificador o RENSPA.`);
 if (report.missingAdministrativeRows) report.warnings.push(`${report.missingAdministrativeRows} filas con coordenadas no tienen departamento y/o municipio.`);
 if (report.unrecognizedFields.length) report.warnings.push("Hay columnas no reconocidas; revisar el reporte local antes de usar la fuente.");
+if (report.validityCoverage.sinFecha) report.warnings.push(`${report.validityCoverage.sinFecha} productores no tienen una fecha de actualización válida; se clasifican como no vigentes.`);
+if (report.validityCoverage.fechaFutura) report.warnings.push(`${report.validityCoverage.fechaFutura} productores tienen fecha de actualización futura respecto de ${referenceDate}; se conservan como vigentes y requieren revisión.`);
 
 mkdirSync(path.dirname(output), { recursive: true });
 mkdirSync(path.dirname(reportPath), { recursive: true });
@@ -167,6 +194,7 @@ console.log(`Con coordenadas válidas: ${report.withValidCoordinates}`);
 console.log(`Sin coordenadas: ${report.withoutCoordinates}`);
 console.log(`Filas con existencias negativas: ${report.negativeExistenceRows}`);
 console.log(`Productores con total cero: ${report.totalZeroRows}`);
+console.log(`Vigencia al ${referenceDate}: ${report.validityCoverage.vigente} vigentes, ${report.validityCoverage.noVigente} no vigentes, ${report.validityCoverage.sinFecha} sin fecha y ${report.validityCoverage.fechaFutura} fechas futuras.`);
 console.log(`Salida: ${path.relative(process.cwd(), output)}`);
 console.log(`Reporte: ${path.relative(process.cwd(), reportPath)}`);
 
@@ -216,11 +244,11 @@ function detectFields(headers) {
   const recognized = new Set([id, renspa, dni, cuit, cuil, cuitCuil, document, name, legalName].filter(Boolean).map(canonical));
   const species = Object.fromEntries(Object.entries(speciesAliases).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
   const categories = Object.fromEntries(Object.entries(CATEGORY_ALIASES).map(([key, aliases]) => [key, find(aliases)]).filter(([, field]) => field));
-  const fields = { idOrRenspa: id || renspa, id, renspa, dni, cuit, cuil, cuitCuil, document, name, legalName, establecimiento: find(["establecimiento", "nombreestablecimiento"]), departamento: find(["departamento", "depto", "dep", "partido"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
-  [fields.establecimiento, fields.departamento, fields.municipio, fields.oficina, fields.paraje, fields.lat, fields.lon, ...Object.values(species), ...Object.values(categories)].filter(Boolean).forEach((field) => recognized.add(canonical(field)));
+  const fields = { idOrRenspa: id || renspa, id, renspa, dni, cuit, cuil, cuitCuil, document, name, legalName, ultimaActualizacion: find(["ultimaactualizacion"]), establecimiento: find(["establecimiento", "nombreestablecimiento"]), departamento: find(["departamento", "depto", "dep", "partido"]), municipio: find(["municipio", "muni", "localidad"]), oficina: find(["oficinalocal", "oficina", "oficinasenasa"]), paraje: find(["paraje", "localidad", "localidadparaje"]), lat: find(["lat", "latitud", "latitude"]), lon: find(["lon", "lng", "longitud", "longitude"]), species, categories, recognized };
+  [fields.ultimaActualizacion, fields.establecimiento, fields.departamento, fields.municipio, fields.oficina, fields.paraje, fields.lat, fields.lon, ...Object.values(species), ...Object.values(categories)].filter(Boolean).forEach((field) => recognized.add(canonical(field)));
   return fields;
 }
-function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuit: fields.cuit || null, cuil: fields.cuil || null, cuitCuil: fields.cuitCuil || null, document: fields.document || null, name: fields.name || null, legalName: fields.legalName || null, establecimiento: fields.establecimiento || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories, categoriesBySpecies: Object.fromEntries(Object.entries(CATEGORY_SCHEMA).map(([species, definitions]) => [species, Object.keys(definitions).filter((key) => Boolean(fields.categories[key]))])) }; }
+function summarizeFields(fields) { return { idOrRenspa: fields.idOrRenspa || null, id: fields.id || null, renspa: fields.renspa || null, dni: fields.dni || null, cuit: fields.cuit || null, cuil: fields.cuil || null, cuitCuil: fields.cuitCuil || null, document: fields.document || null, name: fields.name || null, legalName: fields.legalName || null, ultimaActualizacion: fields.ultimaActualizacion || null, establecimiento: fields.establecimiento || null, departamento: fields.departamento || null, municipio: fields.municipio || null, oficina: fields.oficina || null, paraje: fields.paraje || null, lat: fields.lat || null, lon: fields.lon || null, species: fields.species, categories: fields.categories, categoriesBySpecies: Object.fromEntries(Object.entries(CATEGORY_SCHEMA).map(([species, definitions]) => [species, Object.keys(definitions).filter((key) => Boolean(fields.categories[key]))])) }; }
 function buildSearchKeys(row, fields, { renspa, sourceIdentifier }) {
   const raw = {
     renspa,
@@ -250,6 +278,33 @@ function updateIdentifierCoverage(coverage, searchKeys, seen, output) {
   }
 }
 function canonical(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function isCalendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+function shiftCalendarDate(iso, days) {
+  const date = new Date(`${iso}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+function parseUpdateDate(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  if ((typeof value === "number" && Number.isFinite(value)) || (typeof value === "string" && /^\d{5,7}(?:\.\d+)?$/.test(value.trim()))) {
+    // Excel's 1900 date system uses 1899-12-30 as the serial epoch.
+    const serial = Number(value);
+    if (serial < 1 || serial > 2958465) return null;
+    return shiftCalendarDate("1899-12-30", Math.floor(serial));
+  }
+  const text = String(value).trim();
+  const iso = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(text);
+  if (iso) return isCalendarDate(iso[1]) && validTime(iso[2], iso[3], iso[4]) ? iso[1] : null;
+  const local = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(text);
+  if (!local) return null;
+  const date = `${local[3]}-${local[2].padStart(2, "0")}-${local[1].padStart(2, "0")}`;
+  return isCalendarDate(date) && validTime(local[4], local[5], local[6]) ? date : null;
+}
+function validTime(hour, minute, second) { return hour === undefined || (Number(hour) <= 23 && Number(minute) <= 59 && (second === undefined || Number(second) <= 59)); }
 function valueAt(row, field) { return field ? row[field] : ""; }
 function cleanValue(value) { return String(value ?? "").trim().slice(0, 160); }
 function parseCoordinate(value, axis) { const number = Number(String(value ?? "").trim().replace(/\s/g, "").replace(",", ".")); const max = axis === "lat" ? 90 : 180; return Number.isFinite(number) && Math.abs(number) > 0.01 && Math.abs(number) <= max ? number : NaN; }

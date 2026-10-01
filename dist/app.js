@@ -53,6 +53,22 @@
   const sum = (items, key) => items.reduce((total, item) => total + (key ? value(item, key) : Number(item || 0)), 0);
 
   const APP_CONFIG = window.APP_CONFIG || {};
+  const validityHelper = globalThis.SENASA_RenspaValidity;
+  const validityReference = validityHelper?.referenceISO(new Date(), APP_CONFIG.RENSPA_VALIDITY_TIMEZONE || "America/Argentina/Buenos_Aires");
+  const getRenspaValidity = (producer, referenceDate = validityReference) => validityHelper.getRenspaValidity(producer, referenceDate, { days: APP_CONFIG.RENSPA_VALIDITY_DAYS || 365, timezone: APP_CONFIG.RENSPA_VALIDITY_TIMEZONE || "America/Argentina/Buenos_Aires" });
+  const validityBadge = (item) => { const validity = getRenspaValidity(item); return `<span class="renspa-validity-badge ${validity.status}">${validity.status === "vigente" ? "Vigente" : "No vigente"}</span>`; };
+  const validityFilterLabel = (filter) => ({ all: "Todos", vigente: "Vigentes", no_vigente: "No vigentes" })[filter] || "Todos";
+  function readOperationalScope() {
+    try {
+      const value = JSON.parse(sessionStorage.getItem("senasa-internal-scope-v1") || "{}");
+      const types = Array.isArray(value.types) ? value.types.filter((type) => ["ganadero", "mixto", "agricola"].includes(type)) : [];
+      const polygon = Array.isArray(value.polygon) && value.polygon.length >= 3 && value.polygon.length <= 100 ? value.polygon.filter((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) : [];
+      return { types: types.length ? types : ["ganadero", "mixto", "agricola"], validity: ["all", "vigente", "no_vigente"].includes(value.validity) ? value.validity : "all", category: typeof value.category === "string" ? value.category : "", minStock: Number.isInteger(value.minStock) && value.minStock >= 0 ? value.minStock : null, maxStock: Number.isInteger(value.maxStock) && value.maxStock >= 0 ? value.maxStock : null, polygon: polygon.length >= 3 ? polygon : null };
+    } catch { return { types: ["ganadero", "mixto", "agricola"], validity: "all", category: "", minStock: null, maxStock: null, polygon: null }; }
+  }
+  function saveOperationalScope(state) {
+    try { sessionStorage.setItem("senasa-internal-scope-v1", JSON.stringify({ types: [...state.selectedTypes], validity: state.renspaValidityFilter, category: state.category, minStock: state.minStock, maxStock: state.maxStock, polygon: state.activePolygon })); } catch { /* El dashboard funciona sin almacenamiento local. */ }
+  }
   const canShowFullIdentifiers = () => APP_CONFIG.PUBLIC_SAFE_MODE !== true && APP_CONFIG.INTERNAL_MODE === true && APP_CONFIG.SHOW_FULL_IDENTIFIERS === true;
   function formatIdentifier(value, type, options = {}) {
     const text = String(value ?? "").trim();
@@ -151,7 +167,7 @@
       setupCommon(data);
       setupProtectedLocator();
       if (document.body.dataset.view === "territorio") await initTerritory(data);
-      if (document.body.dataset.view === "analisis") initAnalysis(data);
+      if (document.body.dataset.view === "analisis") await initAnalysis(data);
     } catch (error) {
       showDataError(APP_CONFIG.DATA_URL || "./data/senasa-corrientes.json", error);
     }
@@ -192,7 +208,7 @@
           dialog?.close?.();
           if (result.matches.length === 1) {
             selectProducer(result.matches[0], { state: activeOperationalState, source: "search", ensureVisible: true });
-            setText("#selectionStatus", `Productor localizado · tipo ${producerTypeLabel(result.matches[0].tipoRenspa)} · ${validCoordinatePair(result.matches[0].lat, result.matches[0].lon) ? "se muestra en el mapa y la ficha protegida" : "sin coordenada válida; se muestra la ficha protegida"}.`);
+            setText("#selectionStatus", `Productor localizado · tipo ${producerTypeLabel(result.matches[0].tipoRenspa)} · ${getRenspaValidity(result.matches[0]).status === "no_vigente" ? "El productor corresponde a RENSPA no vigente · " : ""}${validCoordinatePair(result.matches[0].lat, result.matches[0].lon) ? "se muestra en el mapa y la ficha protegida" : "sin coordenada válida; se muestra la ficha protegida"}.`);
           } else {
             activeOperationalState.locatorMatches = result.matches;
             activeOperationalState.selected = null;
@@ -562,6 +578,15 @@
       setOperationalLoadingStatus("Preparando filtros…");
       const normalizeStarted = performance.now();
       const normalized = normalizeProducerData(payload);
+      const runtimeValidityCoverage = { total: normalized.length, vigente: 0, noVigente: 0, sinFecha: 0, fechaFutura: 0 };
+      normalized.forEach((item) => {
+        const validity = getRenspaValidity(item);
+        item.vigenciaRenspa = validity.status;
+        item.vigenciaReason = validity.reason;
+        if (validity.status === "vigente") runtimeValidityCoverage.vigente += 1; else runtimeValidityCoverage.noVigente += 1;
+        if (validity.reason === "sin_fecha") runtimeValidityCoverage.sinFecha += 1;
+        if (validity.reason === "fecha_futura") runtimeValidityCoverage.fechaFutura += 1;
+      });
       perfLog("normalización de productores", normalizeStarted);
       // The localizer only returns points that can be safely located on the
       // operational map; records without valid coordinates remain in the
@@ -587,6 +612,8 @@
       const fragmentSummary = payload?._fragmentSummary || {};
       const summary = {
         sourceFile: safeText(sourceReport.sourceFile),
+        validityCoverage: sourceReport.validityCoverage || null,
+        runtimeValidityCoverage,
         rawRows: Number(sourceReport.rowsRead ?? normalized.length),
         normalizedRows: Number(sourceReport.validProducers ?? normalized.length),
         coordinateRows: mapped.length,
@@ -636,14 +663,14 @@
       const detailChunks = Array.isArray(rawData?._detailChunks) ? rawData._detailChunks : [];
       return rows.map((row) => ({
         id: safeOperationalId(row.i, 0),
-        tipoRenspa: normalizeProducerType(row.y), tipoRenspaLabel: producerTypeLabel(row.y),
+        tipoRenspa: normalizeProducerType(row.y), tipoRenspaLabel: producerTypeLabel(row.y), ultimaActualizacionISO: safeText(row.u),
         displayId: canShowFullIdentifiers() && (row.n?.displayName || row.n?.name || row.n?.legalName) ? safeText(row.n.displayName || row.n.name || row.n.legalName) : (safeText(row.d) || `Unidad ${safeText(row.i)}`),
         renspaMasked: safeText(row.r),
         lat: parseCoordinate(row.a), lon: parseCoordinate(row.o),
         departamento: safeText(row.p), municipio: safeText(row.m), oficinaLocal: safeText(row.f),
         totalExistencias: positiveNumber(row.t),
         especies: Object.fromEntries(wireSpecies.map((key, index) => [key, positiveNumber(row.e?.[index])])),
-        categorias: {}, categoryKeys: Array.isArray(row.c) ? row.c.map(safeText).filter(Boolean) : [],
+        categorias: row.v && typeof row.v === "object" ? row.v : {}, categoryKeys: Array.isArray(row.c) ? row.c.map(safeText).filter(Boolean) : [],
         detailChunk: detailChunks[Number(row.x)] || "", rawSafe: {}, searchKeys: {}, searchTokens: [], identifiers: row.h && typeof row.h === "object" ? row.h : {}, person: row.n && typeof row.n === "object" ? row.n : {},
       }));
     }
@@ -686,6 +713,7 @@
         id,
         tipoRenspa: normalizeProducerType(row?.tipoRenspa || row?.__sourceSheet),
         tipoRenspaLabel: safeText(row?.tipoRenspaLabel) || producerTypeLabel(row?.tipoRenspa || row?.__sourceSheet),
+        ultimaActualizacionISO: safeText(row?.ultimaActualizacionISO),
         displayId: canShowFullIdentifiers() && (person.displayName || person.name || person.legalName) ? safeText(person.displayName || person.name || person.legalName) : rawRenspa ? `RENSPA ${fullRenspa}` : existingDisplayId || (maskedRenspa ? `RENSPA ${maskedRenspa}` : `Unidad ${id}`),
         renspaMasked: rawRenspa ? maskIdentifier(rawRenspa) : maskedRenspa,
         lat: parseCoordinate(get("lat")), lon: parseCoordinate(get("lon")),
@@ -754,9 +782,32 @@
   }
   function producerTypeLabel(value) { return ({ agricola: "Agrícola", ganadero: "Ganadero", mixto: "Mixto" })[normalizeProducerType(value)]; }
   function typeEligibleRecords(state) {
-    if (!state.indexes?.byType) return (state.records || []).filter((item) => state.selectedTypes.has(item.tipoRenspa));
+    if (!state.indexes?.byType) return (state.records || []).filter((item) => state.selectedTypes.has(item.tipoRenspa) && (state.renspaValidityFilter === "all" || getRenspaValidity(item).status === state.renspaValidityFilter));
     const ids = new Set([...state.selectedTypes].flatMap((type) => [...(state.indexes.byType.get(type) || [])]));
+    if (state.renspaValidityFilter !== "all") ids.forEach((id) => { if (!state.indexes.byValidity.get(state.renspaValidityFilter)?.has(id)) ids.delete(id); });
     return [...ids].map((id) => state.indexes.byId.get(id)).filter(Boolean);
+  }
+  function syncRenspaValidityFilter(state) {
+    const target = $("#renspaValidityButtons");
+    if (!target) return;
+    target.innerHTML = [["all", "Todos"], ["vigente", "Vigentes"], ["no_vigente", "No vigentes"]].map(([key, label]) => `<button type="button" data-renspa-validity="${key}" aria-pressed="${state.renspaValidityFilter === key}">${label}</button>`).join("");
+  }
+  function initRenspaValidityFilter(state) {
+    const control = $("#renspaValidityControl");
+    if (!control) return;
+    control.hidden = false;
+    syncRenspaValidityFilter(state);
+    control.addEventListener("click", (event) => {
+      const selected = event.target?.closest?.("[data-renspa-validity]")?.dataset.renspaValidity;
+      if (!selected || selected === state.renspaValidityFilter) return;
+      state.renspaValidityFilter = selected;
+      state.filterMemo.clear();
+      syncRenspaValidityFilter(state);
+      const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
+      syncOperationalLocationControls(typeEligibleRecords(state), state.filters, controls);
+      clearOperationalSelection(state);
+      renderOperationalTerritory(state.data, state);
+    });
   }
   function syncProducerTypeFilter(state) {
     const target = $("#producerTypeButtons");
@@ -811,17 +862,21 @@
     document.querySelector(".senasa-nav-note")?.replaceChildren(Object.assign(document.createElement("span"), { className: "status-dot" }), document.createTextNode("Modo interno operativo"));
     const modeBadge = document.querySelector(".senasa-public-badge"); if (modeBadge) modeBadge.innerHTML = '<span class="status-dot"></span>Modo interno operativo';
     const notice = $("#internalModeNotice"); notice.hidden = false; notice.innerHTML = source.loading ? "<strong>Modo interno operativo</strong> · Cargando productores…" : source.records?.length ? `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "Datos internos cargados.")} No publicar sin autenticación ni control de acceso.` : `<strong>Modo interno operativo</strong> · ${escapeHtml(source.message || "No se pudo cargar la fuente interna. Contacte al administrador del dashboard.")}`;
-    const state = { data, loading: Boolean(source.loading), filters: { ...readGlobalFilters(), species: "bovinos" }, selectedTypes: new Set(["ganadero", "mixto"]), category: "", minStock: null, maxStock: null, selected: null, selectedProducer: null, clusterSelection: null, expandedCluster: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", searchIndexUrl: source.searchIndexUrl || "", detailManifestUrl: source.detailManifestUrl || "", indexes: null, filterMemo: new Map(), detailChunkCache: new Map(), map: null, markerLayer: null, expandedClusterLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "", areaMode: "browse", drawingVertices: [], activePolygon: null, areaLayer: null, areaDraftLayer: null, areaVertexLayer: null };
+    const savedScope = readOperationalScope();
+    const state = { data, loading: Boolean(source.loading), filters: readGlobalFilters(), selectedTypes: new Set(savedScope.types), renspaValidityFilter: savedScope.validity, category: savedScope.category, minStock: savedScope.minStock, maxStock: savedScope.maxStock, selected: null, selectedProducer: null, clusterSelection: null, expandedCluster: null, locatorMatches: null, selectionSource: "", records: source.records || [], allRecords: source.allRecords || source.records || [], sourceSummary: source.summary || {}, sourceMessage: source.message || "", searchIndexUrl: source.searchIndexUrl || "", detailManifestUrl: source.detailManifestUrl || "", indexes: null, filterMemo: new Map(), detailChunkCache: new Map(), map: null, markerLayer: null, expandedClusterLayer: null, selectedProducerLayer: null, selectedMarker: null, boundaryLayer: null, diagnostics: null, speciesWarning: "", areaMode: savedScope.polygon ? "active" : "browse", drawingVertices: [], activePolygon: savedScope.polygon, areaLayer: null, areaDraftLayer: null, areaVertexLayer: null };
     activeOperationalState = state;
     const controls = { species: $("#speciesSelect"), department: $("#departmentSelect"), municipality: $("#municipalitySelect"), office: $("#officeSelect") };
     initProducerTypeFilter(state);
+    initRenspaValidityFilter(state);
     setOperationalControlsDisabled(controls, state.loading);
-    syncOperationalLocationControls(typeEligibleRecords(state), state.filters, controls);
+    if (!state.loading) syncOperationalLocationControls(typeEligibleRecords(state), state.filters, controls);
     bindOperationalLocationControls(state, state.filters, controls, () => { clearOperationalSelection(state); renderOperationalTerritory(data, state); }, () => {
       state.category = "";
       updateCategoryOptions(state.filters.species, state);
     });
     updateCategoryOptions(state.filters.species, state);
+    if (state.minStock !== null) $("#producerMinStock").value = String(state.minStock);
+    if (state.maxStock !== null) $("#producerMaxStock").value = String(state.maxStock);
     $("#producerCategorySelect")?.addEventListener("change", (event) => { state.category = event.target.value; clearOperationalSelection(state); renderOperationalTerritory(data, state); });
     const applyStockRange = debounce(() => {
       const range = readOperationalStockRange();
@@ -844,6 +899,7 @@
     const map = initProducerMap(state, producerMap, data);
     if (!map) return;
     bindOperationalAreaTools(state);
+    renderOperationalArea(state);
     if (!state.records.length && !state.loading) showOperationalEmpty(source.message);
     renderOperationalTerritory(data, state);
     return state;
@@ -880,6 +936,7 @@
   function setOperationalControlsDisabled(controls, disabled) {
     Object.values(controls || {}).forEach((control) => { if (control) control.disabled = disabled; });
     ["#producerCategorySelect", "#producerMinStock", "#producerMaxStock", "#clearOperationalFiltersButton", "#locatorInput", "#locatorType"].forEach((selector) => { const control = $(selector); if (control) control.disabled = disabled; });
+    $("#renspaValidityControl")?.querySelectorAll("button").forEach((button) => { button.disabled = disabled; });
   }
 
   function resetOperationalView(state) {
@@ -932,8 +989,10 @@
 
   function resetOperationalFilters(state, controls) {
     Object.assign(state.filters, defaultFilters());
-    state.selectedTypes = new Set(["ganadero", "mixto"]);
+    state.selectedTypes = new Set(["ganadero", "mixto", "agricola"]);
+    state.renspaValidityFilter = "all";
     syncProducerTypeFilter(state);
+    syncRenspaValidityFilter(state);
     state.category = "";
     state.minStock = null;
     state.maxStock = null;
@@ -1273,6 +1332,12 @@
   function updateCategoryOptions(speciesKey, state) {
     const select = $("#producerCategorySelect");
     if (!select) return [];
+    if (state?.loading) {
+      select.disabled = true;
+      select.innerHTML = `<option value="${escapeHtml(state.category || "")}">Cargando categorías…</option>`;
+      select.value = state.category || "";
+      return [];
+    }
     const categories = getCategoriesForSpecies(speciesKey, state?.records || []);
     const allowed = new Set(categories.map((item) => item.key));
     if (state?.category && !allowed.has(state.category)) state.category = "";
@@ -1295,7 +1360,7 @@
     const all = state.records || [];
     const selectedSpecies = filters.species === "all" ? "" : normalizeSpeciesKey(filters.species);
     const compatibleCategories = state.availableCategories || getCategoriesForSpecies(selectedSpecies, state.records || []).map((item) => item.key);
-    if (state.category && !compatibleCategories.includes(state.category)) {
+    if (!state.loading && state.category && !compatibleCategories.includes(state.category)) {
       state.category = "";
       const categorySelect = $("#producerCategorySelect");
       if (categorySelect) categorySelect.value = "";
@@ -1304,12 +1369,13 @@
     const speciesAvailable = !selectedSpecies || Boolean(state.indexes?.species?.get(selectedSpecies)?.size ?? all.some((item) => speciesValue(item, selectedSpecies) > 0));
     state.speciesWarning = selectedSpecies && !speciesAvailable ? `La fuente interna no contiene valores positivos para ${speciesLabel(selectedSpecies)}.` : "";
     const areaKey = state.activePolygon?.map(([lat, lon]) => `${lat.toFixed(6)},${lon.toFixed(6)}`).join(";") || "";
-    const memoKey = [[...state.selectedTypes].sort().join(","), selectedSpecies || "all", filters.department || "all", filters.municipality || "", filters.office || "", state.category || "", state.minStock ?? "", state.maxStock ?? "", areaKey].join("|");
+    const memoKey = [validityReference, [...state.selectedTypes].sort().join(","), state.renspaValidityFilter, selectedSpecies || "all", filters.department || "all", filters.municipality || "", filters.office || "", state.category || "", state.minStock ?? "", state.maxStock ?? "", areaKey].join("|");
     if (state.filterMemo?.has(memoKey)) return state.filterMemo.get(memoKey);
     const filterStarted = performance.now();
     const speciesCandidates = selectedSpecies ? new Set([...(state.indexes?.species?.get(selectedSpecies) || []), ...(state.indexes?.zeroTotal || [])]) : null;
     let candidates = new Set([...state.selectedTypes].flatMap((type) => [...(state.indexes?.byType?.get(type) || [])]));
     const intersect = (set) => { if (!set) { candidates.clear(); return; } candidates.forEach((id) => { if (!set.has(id)) candidates.delete(id); }); };
+    if (state.renspaValidityFilter !== "all") intersect(state.indexes?.byValidity?.get(state.renspaValidityFilter));
     if (speciesCandidates) intersect(speciesCandidates);
     if (filters.department !== "all" && filters.department) intersect(state.indexes?.department?.get(filters.department));
     if (filters.municipality) intersect(state.indexes?.municipality?.get(filters.municipality));
@@ -1345,11 +1411,12 @@
   }
 
   function buildOperationalIndexes(records) {
-    const indexes = { byId: new Map(), byType: new Map(), species: new Map(), department: new Map(), municipality: new Map(), office: new Map(), category: new Map(), coordinateCounts: new Map(), zeroTotal: new Set() };
+    const indexes = { byId: new Map(), byType: new Map(), byValidity: new Map(), species: new Map(), department: new Map(), municipality: new Map(), office: new Map(), category: new Map(), coordinateCounts: new Map(), zeroTotal: new Set() };
     const add = (map, key, id) => { if (!key) return; if (!map.has(key)) map.set(key, new Set()); map.get(key).add(id); };
     for (const item of records || []) {
       indexes.byId.set(item.id, item);
       add(indexes.byType, item.tipoRenspa, item.id);
+      add(indexes.byValidity, getRenspaValidity(item).status, item.id);
       if (Number(item.totalExistencias) === 0) indexes.zeroTotal.add(item.id);
       Object.keys(item.especies || {}).forEach((key) => { if (speciesValue(item, key) > 0) add(indexes.species, key, item.id); });
       add(indexes.department, item.departamento, item.id);
@@ -1372,6 +1439,7 @@
     renderOperationalPanel(rows, state);
     renderInternalTerritorialSummary(rows, state);
     renderOperationalFilterChips(state, rows.length);
+    if (!state.loading) saveOperationalScope(state);
     mapDebug("Productores visibles tras filtros", { visible: rows.length });
     setText("#selectionStatus", state.loading ? "Cargando productores…" : selectedProducer ? `Unidad seleccionada · ${selectedProducer.displayId}` : `${formatNumber.format(rows.length)} productores georreferenciados visibles · seleccione un punto para ver el detalle.`);
     const warning = $("#internalFilterWarning");
@@ -1412,7 +1480,7 @@
     setText("#metricConcentrationLabel", isAllSpecies ? "RENSPA CON EXISTENCIAS" : "CONCENTRACIÓN TOP 5");
     setText("#metricConcentration", isAllSpecies ? formatNumber.format(new Set(rows.filter((item) => item.totalExistencias > 0).map((item) => item.identifiers?.renspa || item.id)).size) : selectedSpecies ? `${Math.round((top / selectedSpecies) * 100)}%` : "—");
     setText("#metricGrids", formatNumber.format(rows.length));
-    setText("#metricMapped", `${[...state.selectedTypes].map(producerTypeLabel).join(" + ")} · Según tipo y filtros activos`);
+    setText("#metricMapped", `${[...state.selectedTypes].map(producerTypeLabel).join(" + ")} · ${validityFilterLabel(state.renspaValidityFilter)} · Según filtros activos`);
   }
 
   function renderOperationalMarkers(state) {
@@ -1547,7 +1615,7 @@
     const sharedCount = sameCoordinateCount(item, state);
     const shared = sharedCount > 1 ? `<span class="producer-shared-note">Ubicación compartida por ${formatNumber.format(sharedCount)} productores.</span>` : "";
     const selectedSpecies = normalizeSpeciesKey(state?.filters?.species) || "bovinos";
-    return `<div class="producer-popup"><strong>${escapeHtml(item.displayId)}</strong><span class="producer-type-badge type-${escapeHtml(item.tipoRenspa)}">${escapeHtml(producerTypeLabel(item.tipoRenspa))}</span><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(speciesValue(item, selectedSpecies))}</b> ${escapeHtml(speciesLabel(selectedSpecies).toLowerCase())} · ${formatNumber.format(item.totalExistencias)} total</span>${Number(item.totalExistencias) === 0 ? "<span>Existencias declaradas: 0</span>" : ""}${shared}</div>`;
+    return `<div class="producer-popup"><strong>${escapeHtml(item.displayId)}</strong><span class="producer-type-badge type-${escapeHtml(item.tipoRenspa)}">${escapeHtml(producerTypeLabel(item.tipoRenspa))}</span>${validityBadge(item)}<span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(speciesValue(item, selectedSpecies))}</b> ${escapeHtml(speciesLabel(selectedSpecies).toLowerCase())} · ${formatNumber.format(item.totalExistencias)} total</span>${Number(item.totalExistencias) === 0 ? "<span>Existencias declaradas: 0</span>" : ""}${shared}</div>`;
   }
   function dominantProducerSpecies(item) {
     const dominant = Object.entries(item.especies || {}).sort((a, b) => b[1] - a[1])[0];
@@ -1561,14 +1629,14 @@
       return false;
     }
     if (!validCoordinatePair(item.lat, item.lon)) {
-      if (options.ensureVisible) ensureOperationalItemVisible(item, state);
+      if (options.ensureVisible) { ensureOperationalItemVisible(item, state); renderOperationalTerritory(state.data, state); }
       clearOperationalSelection(state);
       state.selected = item;
       state.selectedProducer = item;
       state.selectionSource = options.source || "search";
       state.detailLoadingId = item.detailChunk && !item.detailLoaded ? item.id : "";
       renderOperationalPanel(state.visible || state.records, state);
-      setText("#selectionStatus", `Productor localizado · tipo ${producerTypeLabel(item.tipoRenspa)} · sin coordenada válida para el mapa.`);
+      setText("#selectionStatus", `Productor localizado · tipo ${producerTypeLabel(item.tipoRenspa)} · ${getRenspaValidity(item).status === "no_vigente" ? "El productor corresponde a RENSPA no vigente · " : ""}sin coordenada válida para el mapa.`);
       if (state.detailLoadingId) loadProducerDetail(item, state);
       return true;
     }
@@ -1599,7 +1667,7 @@
     const panelStarted = performance.now();
     renderOperationalPanel(state.visible || state.records, state);
     perfLog("actualización de ficha lateral", panelStarted);
-    setText("#selectionStatus", `Unidad seleccionada · ${item.displayId}`);
+    setText("#selectionStatus", `${options.source?.startsWith("search") && getRenspaValidity(item).status === "no_vigente" ? "El productor corresponde a RENSPA no vigente · " : ""}Unidad seleccionada · ${item.displayId}`);
     if (state.detailLoadingId) loadProducerDetail(item, state);
     mapDebug("Productor seleccionado", { source: state.selectionSource, producerId: Boolean(item.id), latLonValid: true, highlightedMarkerCreated: Boolean(state.selectedMarker), panelUpdated: Boolean($("#producerDetail") && !$("#producerDetail").hidden) });
     return true;
@@ -1628,6 +1696,7 @@
       item.identifiers = detail.identifiers && typeof detail.identifiers === "object" ? detail.identifiers : item.identifiers || {};
       item.person = detail.person && typeof detail.person === "object" ? detail.person : item.person || {};
       item.categorias = detail.categorias && typeof detail.categorias === "object" ? detail.categorias : {};
+      item.ultimaActualizacionISO = safeText(detail.ultimaActualizacionISO || item.ultimaActualizacionISO);
       item.categoryKeys = Object.keys(item.categorias).filter((key) => positiveNumber(item.categorias[key]) > 0);
       item.detailLoaded = true;
       if (state.detailLoadingId === item.id) state.detailLoadingId = "";
@@ -1648,7 +1717,7 @@
     const sharedCount = sameCoordinateCount(item, state);
     const selectedSpecies = normalizeSpeciesKey(state.filters.species) || "bovinos";
     const marker = L.marker([item.lat, item.lon], { icon: L.divIcon({ className: "selected-producer-icon", html: `<span class="selected-producer-marker" aria-hidden="true"></span>`, iconSize: [38, 38], iconAnchor: [19, 19] }), zIndexOffset: 5000, riseOnHover: true });
-    marker.bindPopup(`<div class="producer-popup"><strong>Productor localizado</strong><span>${escapeHtml(item.displayId)}</span><span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(speciesValue(item, selectedSpecies))}</b> ${escapeHtml(speciesLabel(selectedSpecies).toLowerCase())} · ${formatNumber.format(item.totalExistencias)} total</span>${Number(item.totalExistencias) === 0 ? "<span>Existencias declaradas: 0</span>" : ""}${sharedCount > 1 ? `<span class="producer-shared-note">Ubicación compartida por ${formatNumber.format(sharedCount)} productores.</span>` : ""}</div>`, { closeButton: true, autoPan: true });
+    marker.bindPopup(`<div class="producer-popup"><strong>Productor localizado</strong><span>${escapeHtml(item.displayId)}</span>${validityBadge(item)}<span>${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación administrativa no informada")}</span><span><b>${formatNumber.format(speciesValue(item, selectedSpecies))}</b> ${escapeHtml(speciesLabel(selectedSpecies).toLowerCase())} · ${formatNumber.format(item.totalExistencias)} total</span>${Number(item.totalExistencias) === 0 ? "<span>Existencias declaradas: 0</span>" : ""}${sharedCount > 1 ? `<span class="producer-shared-note">Ubicación compartida por ${formatNumber.format(sharedCount)} productores.</span>` : ""}</div>`, { closeButton: true, autoPan: true });
     layer.addLayer(marker);
     state.selectedMarker = marker;
     marker.openPopup();
@@ -1657,6 +1726,11 @@
   function ensureOperationalItemVisible(item, state) {
     const filters = state.filters;
     if (!state.selectedTypes.has(item.tipoRenspa)) state.selectedTypes.add(item.tipoRenspa);
+    const validity = getRenspaValidity(item).status;
+    if (state.renspaValidityFilter !== "all" && state.renspaValidityFilter !== validity) {
+      state.renspaValidityFilter = validity;
+      syncRenspaValidityFilter(state);
+    }
     syncProducerTypeFilter(state);
     if (filters.species !== "all" && Number(item.totalExistencias) > 0 && speciesValue(item, filters.species) <= 0) {
       const candidate = dominantProducerSpecies(item);
@@ -1700,7 +1774,7 @@
       setText("#focusEyebrow", isSearch ? "RESULTADOS DEL LOCALIZADOR" : `${formatNumber.format(matches.length)} PRODUCTORES AGRUPADOS`);
       setText("#focusTitle", isSearch ? "Productores localizados" : "Grupo de productores");
       setText("#focusFootnote", "Seleccione una fila para centrar el mapa y abrir la ficha desagregada.");
-      list.innerHTML = `<p class="cluster-summary">${isSearch ? `Coincidencias encontradas en la fuente interna. ${formatNumber.format(matches.length)} resultado(s).` : `Grupo expandido: ${formatNumber.format(matches.length)} productores en esta ubicación o zona cercana. Seleccione un productor para ver su ficha desagregada.`}</p>${matches.slice(0, 20).map((item, index) => `<button class="ranking-item operational-focus-row cluster-list-item" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio, item.oficinaLocal].filter(Boolean).join(" · ") || "Ubicación no informada")}</small><small class="ranking-species">${isSearch && item.locatorMatchTypes?.length ? `${escapeHtml(item.locatorMatchTypes.map((value) => ({ dni: "DNI", cuit: "CUIT", cuil: "CUIL", cuit_cuil: "CUIT/CUIL", document: "DOCUMENTO" })[value] || value).join(" / "))} · ${escapeHtml(item.locatorMaskedIdentifier || "Identificador enmascarado")}` : escapeHtml(speciesLabel(dominantProducerSpecies(item)))}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em><small class="ranking-total">${formatNumber.format(item.totalExistencias)} total</small></span></button>`).join("")}${matches.length > 20 ? `<p class="cluster-summary">Se muestran las primeras 20 de ${formatNumber.format(matches.length)} coincidencias.</p>` : ""}`;
+      list.innerHTML = `<p class="cluster-summary">${isSearch ? `Coincidencias encontradas en la fuente interna. ${formatNumber.format(matches.length)} resultado(s).` : `Grupo expandido: ${formatNumber.format(matches.length)} productores en esta ubicación o zona cercana. Seleccione un productor para ver su ficha desagregada.`}</p>${matches.slice(0, 20).map((item, index) => `<button class="ranking-item operational-focus-row cluster-list-item" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong>${validityBadge(item)}<small class="ranking-location">${escapeHtml([item.departamento, item.municipio, item.oficinaLocal].filter(Boolean).join(" · ") || "Ubicación no informada")}</small><small class="ranking-species">${isSearch && item.locatorMatchTypes?.length ? `${escapeHtml(item.locatorMatchTypes.map((value) => ({ dni: "DNI", cuit: "CUIT", cuil: "CUIL", cuit_cuil: "CUIT/CUIL", document: "DOCUMENTO" })[value] || value).join(" / "))} · ${escapeHtml(item.locatorMaskedIdentifier || "Identificador enmascarado")}` : escapeHtml(speciesLabel(dominantProducerSpecies(item)))}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em><small class="ranking-total">${formatNumber.format(item.totalExistencias)} total</small></span></button>`).join("")}${matches.length > 20 ? `<p class="cluster-summary">Se muestran las primeras 20 de ${formatNumber.format(matches.length)} coincidencias.</p>` : ""}`;
       list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = matches.find((row) => row.id === button.dataset.producerId); if (item) selectProducer(item, { state, source: isSearch ? "search-result-list" : "cluster-list", ensureVisible: isSearch }); }));
       scrollSelectedRankingRow(list, selectedProducer);
       return;
@@ -1708,7 +1782,7 @@
     setText("#focusEyebrow", "RANKING OPERATIVO"); setText("#focusTitle", "Unidades destacadas"); setText("#focusFootnote", selectedProducer ? "Información interna desagregada. No compartir ni publicar sin autorización." : "Seleccione un productor en el mapa para consultar su ficha operativa.");
     const rankingStarted = performance.now();
     const ranked = topProducers(rows, 100, state.filters.species);
-    list.innerHTML = ranked.length ? ranked.map((item, index) => `<button class="ranking-item operational-focus-row" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong><small class="ranking-location">${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em></span></button>`).join("") : "<p class=\"empty-panel-message\">No hay productores visibles para los filtros seleccionados.</p>";
+    list.innerHTML = ranked.length ? ranked.map((item, index) => `<button class="ranking-item operational-focus-row" type="button" data-producer-id="${escapeHtml(item.id)}"><span class="ranking-index focus-rank">${String(index + 1).padStart(2, "0")}</span><span class="ranking-main"><strong class="ranking-title">${escapeHtml(item.displayId)}</strong>${validityBadge(item)}<small class="ranking-location">${escapeHtml([item.departamento, item.municipio].filter(Boolean).join(" · ") || "Ubicación no informada")}</small></span><span class="ranking-value"><b>${formatNumber.format(speciesValue(item, state.filters.species))}</b><em class="ranking-unit">${escapeHtml(speciesLabel(state.filters.species).toLowerCase())}</em></span></button>`).join("") : "<p class=\"empty-panel-message\">No hay productores visibles para los filtros seleccionados.</p>";
     perfLog("render de ranking", rankingStarted, `${ranked.length} filas`);
     list.querySelectorAll("[data-producer-id]").forEach((button) => button.addEventListener("click", () => { const item = rows.find((row) => row.id === button.dataset.producerId); if (item) selectProducer(item, { state, source: "ranking" }); }));
     scrollSelectedRankingRow(list, selectedProducer);
@@ -1736,6 +1810,9 @@
   }
 
   function producerDetailMarkup(item, options = {}) {
+    const validity = getRenspaValidity(item);
+    const updateDate = /^\d{4}-\d{2}-\d{2}$/.test(item.ultimaActualizacionISO || "") ? item.ultimaActualizacionISO.split("-").reverse().join("/") : "No informada";
+    const validityRows = `<section class="producer-detail-section renspa-validity-detail"><h4>Vigencia RENSPA</h4><table class="producer-detail-table"><tbody><tr><td>Estado RENSPA</td><td>${validityBadge(item)} ${escapeHtml(validity.label)}</td></tr><tr><td>Última actualización</td><td>${escapeHtml(updateDate)}</td></tr><tr><td>Días desde actualización</td><td>${validity.daysSinceUpdate === null ? "No informado" : `${formatNumber.format(validity.daysSinceUpdate)} días`}</td></tr></tbody></table></section>`;
     const total = item.totalExistencias || 1;
     const selectedSpecies = normalizeSpeciesKey(options.species) || "bovinos";
     const selectedSpeciesValue = speciesValue(item, selectedSpecies);
@@ -1753,13 +1830,14 @@
     const person = item.person || {};
     const identityRows = canShowFullIdentifiers() ? [["Nombre / titular", person.displayName || person.name], ["Establecimiento", item.establecimiento], ["Razón social", person.legalName], ["RENSPA", identifiers.renspa], ["DNI", identifiers.dni], ["CUIT", identifiers.cuit], ["CUIL", identifiers.cuil], ["CUIT/L", identifiers.cuitCuil], ["Documento", identifiers.document]].filter(([, current]) => String(current || "").trim()).map(([label, current]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(formatIdentifier(current, label))}</td></tr>`).join("") : "";
     const otherRows = canShowFullIdentifiers() ? Object.entries(item.otherData || {}).map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`).join("") : "";
-    return `<div class="producer-detail-header"><h3>${escapeHtml(item.displayId)}</h3><span class="producer-type-badge type-${escapeHtml(item.tipoRenspa)}">Tipo de RENSPA: ${escapeHtml(producerTypeLabel(item.tipoRenspa))}</span><p>${escapeHtml(location)}</p><small class="producer-detail-id">ID operativo: ${escapeHtml(item.id)}${item.renspaMasked ? ` · RENSPA: ${escapeHtml(formatIdentifier(identifiers.renspa || item.renspaMasked, "renspa"))}` : ""}</small>${sharedNotice}</div>${identityRows ? `<section class="producer-detail-section"><h4>Identificación</h4><table class="producer-detail-table"><tbody>${identityRows}</tbody></table></section>` : ""}<div class="producer-kpis"><div class="is-priority"><span>${escapeHtml(speciesLabel(selectedSpecies))}</span><strong>${formatNumber.format(selectedSpeciesValue)}</strong></div><div><span>Total general</span><strong>${formatNumber.format(item.totalExistencias)}</strong></div></div><section class="producer-detail-section"><h4>Existencias por especie</h4><div class="producer-bars">${bars}</div></section><section class="producer-detail-section"><h4>Categorías de ${escapeHtml(speciesLabel(selectedSpecies))}</h4><table class="producer-detail-table"><tbody>${categoryRows}</tbody></table></section>${otherRows ? `<section class="producer-detail-section"><h4>Otros datos de origen</h4><table class="producer-detail-table"><tbody>${otherRows}</tbody></table></section>` : ""}`;
+    return `<div class="producer-detail-header"><h3>${escapeHtml(item.displayId)}</h3><span class="producer-type-badge type-${escapeHtml(item.tipoRenspa)}">Tipo de RENSPA: ${escapeHtml(producerTypeLabel(item.tipoRenspa))}</span><p>${escapeHtml(location)}</p><small class="producer-detail-id">ID operativo: ${escapeHtml(item.id)}${item.renspaMasked ? ` · RENSPA: ${escapeHtml(formatIdentifier(identifiers.renspa || item.renspaMasked, "renspa"))}` : ""}</small>${sharedNotice}</div>${validityRows}${identityRows ? `<section class="producer-detail-section"><h4>Identificación</h4><table class="producer-detail-table"><tbody>${identityRows}</tbody></table></section>` : ""}<div class="producer-kpis"><div class="is-priority"><span>${escapeHtml(speciesLabel(selectedSpecies))}</span><strong>${formatNumber.format(selectedSpeciesValue)}</strong></div><div><span>Total general</span><strong>${formatNumber.format(item.totalExistencias)}</strong></div></div><section class="producer-detail-section"><h4>Existencias por especie</h4><div class="producer-bars">${bars}</div></section><section class="producer-detail-section"><h4>Categorías de ${escapeHtml(speciesLabel(selectedSpecies))}</h4><table class="producer-detail-table"><tbody>${categoryRows}</tbody></table></section>${otherRows ? `<section class="producer-detail-section"><h4>Otros datos de origen</h4><table class="producer-detail-table"><tbody>${otherRows}</tbody></table></section>` : ""}`;
   }
 
   function renderOperationalFilterChips(state, count) {
     const target = $("#territoryFilterChips"); if (!target) return;
     const labels = [
       ["Tipo", state.selectedTypes.size === 3 ? "Todos" : [...state.selectedTypes].map(producerTypeLabel).join(" + ")],
+      ["Vigencia", validityFilterLabel(state.renspaValidityFilter)],
       ["Especie ganadera", state.filters.species && state.filters.species !== "all" ? speciesLabel(state.filters.species) : "Todas"],
       ["Departamento", state.filters.department !== "all" ? titleCase(state.filters.department) : "Todos"],
       ["Municipio", state.filters.municipality ? titleCase(state.filters.municipality) : "Todos"],
@@ -2051,6 +2129,7 @@
   }
 
   function initAnalysis(data) {
+    if (isInternalOperationalMode()) return initInternalAnalysis(data);
     const controls = {
       species: $("#analysisSpeciesSelect"), department: $("#analysisDepartmentSelect"), municipality: $("#analysisMunicipalitySelect"), office: $("#analysisOfficeSelect"),
       level: $("#analysisLevelSelect"), metric: $("#analysisMetricSelect"), detailSearch: $("#analysisDetailSearch"),
@@ -2105,6 +2184,102 @@
         return { especie: state.filters.species, departamento: state.filters.department, municipio: state.filters.municipality || null, oficina: state.filters.office || null };
       },
     });
+  }
+
+  async function initInternalAnalysis(publicData) {
+    const scope = readOperationalScope();
+    const controls = { species: $("#analysisSpeciesSelect"), department: $("#analysisDepartmentSelect"), municipality: $("#analysisMunicipalitySelect"), office: $("#analysisOfficeSelect"), level: $("#analysisLevelSelect"), metric: $("#analysisMetricSelect"), detailSearch: $("#analysisDetailSearch") };
+    $("#analysisTypeControl").hidden = false;
+    $("#analysisValidityControl").hidden = false;
+    $("#analysisValidityMetrics").hidden = false;
+    $("#analysisValidityComparison").hidden = false;
+    $("#analysisInternalExtraFilters").hidden = false;
+    setText("#analysisPolygonStatus", scope.polygon ? "Polígono del mapa: activo" : "Polígono del mapa: ninguno");
+    const source = await loadInternalProducerSource();
+    if (!source.allRecords?.length) { showDataError(APP_CONFIG.INTERNAL_PRODUCER_DATA_URL, new Error(source.message || "Fuente interna no disponible")); return; }
+    const state = { records: source.allRecords, allRecords: source.allRecords, filters: readGlobalFilters(), selectedTypes: new Set(scope.types), renspaValidityFilter: scope.validity, category: scope.category, minStock: scope.minStock, maxStock: scope.maxStock, activePolygon: scope.polygon, sourceSummary: source.summary || {}, indexes: buildOperationalIndexes(source.allRecords), filterMemo: new Map(), availableCategories: [] };
+    controls.species.value = state.filters.species;
+    $("#analysisMinStock").value = state.minStock ?? "";
+    $("#analysisMaxStock").value = state.maxStock ?? "";
+    const syncTypeButtons = () => { $("#analysisTypeButtons").innerHTML = `<button type="button" data-producer-type="all" aria-pressed="${state.selectedTypes.size === 3}">Todos los RENSPA</button>${[["ganadero", "Ganadero"], ["mixto", "Mixto"], ["agricola", "Agrícola"]].map(([key, label]) => `<button type="button" data-producer-type="${key}" aria-pressed="${state.selectedTypes.has(key)}">${state.selectedTypes.has(key) ? "✓ " : ""}${label}</button>`).join("")}`; };
+    const syncValidityButtons = () => { $("#analysisValidityButtons").innerHTML = [["all", "Todos"], ["vigente", "Vigentes"], ["no_vigente", "No vigentes"]].map(([key, label]) => `<button type="button" data-renspa-validity="${key}" aria-pressed="${state.renspaValidityFilter === key}">${label}</button>`).join(""); };
+    const syncCategories = () => {
+      const categories = getCategoriesForSpecies(state.filters.species, typeEligibleRecords(state));
+      state.availableCategories = categories.map((entry) => entry.key);
+      if (state.category && !state.availableCategories.includes(state.category)) state.category = "";
+      const select = $("#analysisCategorySelect");
+      select.innerHTML = `<option value="">Todas las categorías</option>${categories.map((entry) => `<option value="${escapeHtml(entry.key)}">${escapeHtml(entry.label)}</option>`).join("")}`;
+      select.value = state.category;
+      select.disabled = !categories.length;
+    };
+    const render = () => {
+      syncTypeButtons(); syncValidityButtons();
+      syncOperationalLocationControls(typeEligibleRecords(state), state.filters, controls);
+      syncCategories();
+      state.filterMemo.clear();
+      const producers = operationalRows(state);
+      const rows = producers.map((item) => ({ nombre: item.municipio || "Sin municipio", municipio: item.municipio || "Sin municipio", departamento: item.departamento || "Sin departamento", oficina: item.oficinaLocal || "Sin oficina", registros: 1, all: item.totalExistencias, ...item.especies }));
+      const species = state.filters.species;
+      const totalSpecies = species === "all" ? sum(rows, "all") : sum(rows, species);
+      const totalAnimals = sumSpecies(rows);
+      const units = aggregateUnits(rows, controls.level.value);
+      const valid = producers.filter((item) => getRenspaValidity(item).status === "vigente").length;
+      const expired = producers.length - valid;
+      setText("#analysisTotalRenspa", formatNumber.format(producers.length));
+      setText("#analysisValidRenspa", formatNumber.format(valid));
+      setText("#analysisExpiredRenspa", formatNumber.format(expired));
+      setText("#analysisValidShare", `${formatDecimal.format(producers.length ? valid / producers.length * 100 : 0)}%`);
+      renderAnalysisCards(totalAnimals, totalSpecies, producers.length, species);
+      renderSpecies(rows, totalAnimals);
+      renderBars(units, species, controls.metric.value, totalSpecies, controls.level.value);
+      renderScatter(units, species, controls.level.value);
+      renderSpatialStatistics({ grillas: aggregateInternalGrids(producers) }, state.filters, species);
+      renderAnalysisDetail(units, species, totalSpecies, controls.level.value, controls.detailSearch.value);
+      updateScenario(totalSpecies, species);
+      renderInsight(units, species, totalSpecies, controls.level.value);
+      renderInternalValidityComparison(producers, $("#analysisValidityLevel").value);
+      const chips = [["Tipo", state.selectedTypes.size === 3 ? "Todos" : [...state.selectedTypes].map(producerTypeLabel).join(" + ")], ["Vigencia", validityFilterLabel(state.renspaValidityFilter)], ["Especie", speciesLabel(species)], ["Departamento", state.filters.department === "all" ? "Toda la provincia" : state.filters.department], ["Municipio", state.filters.municipality || "Todos"], ["Oficina", state.filters.office || "Todas"]];
+      if (state.category) chips.push(["Categoría", PRODUCER_CATEGORY_LABELS[state.category] || state.category]);
+      if (state.minStock !== null || state.maxStock !== null) chips.push(["Rango", `${state.minStock ?? 0}–${state.maxStock ?? "∞"}`]);
+      if (state.activePolygon) chips.push(["Polígono", "Activo"]);
+      $("#activeFilterSummary").innerHTML = chips.map(([label, entry]) => `<span class="filter-chip" role="listitem"><b>${escapeHtml(label)}:</b> ${escapeHtml(entry)}</span>`).join("") + `<span class="filter-summary-count">${formatNumber.format(producers.length)} RENSPA</span>`;
+      $("#sourceTraceability").innerHTML = `<ul class="trace-list"><li><span>Fuente</span><strong>${escapeHtml(source.summary?.sourceFile || "SENASA_Ctes.xlsx")}</strong></li><li><span>Referencia de vigencia</span><strong>${escapeHtml(validityReference)} · ${APP_CONFIG.RENSPA_VALIDITY_DAYS || 365} días · America/Argentina/Buenos_Aires</strong></li><li><span>Población</span><strong>${formatNumber.format(producers.length)} RENSPA según filtros activos; ${formatNumber.format(source.allRecords.length)} en la fuente interna.</strong></li><li><span>Privacidad</span><strong>Este análisis muestra agregados; la fuente individual requiere autenticación.</strong></li></ul>`;
+      saveGlobalFilters(state.filters); saveOperationalScope(state);
+      state.snapshot = { data: publicData, filters: { ...state.filters }, rows, species, totalSpecies, totalAnimals, records: producers.length, validity: { total: producers.length, vigente: valid, noVigente: expired }, internalScope: { types: [...state.selectedTypes], validityFilter: state.renspaValidityFilter, category: state.category, minStock: state.minStock, maxStock: state.maxStock, polygonActive: Boolean(state.activePolygon), sourceRecords: source.allRecords.length, sourceFile: source.summary?.sourceFile || "SENASA_Ctes.xlsx", referenceDate: validityReference, validityDays: APP_CONFIG.RENSPA_VALIDITY_DAYS || 365, validityTimezone: APP_CONFIG.RENSPA_VALIDITY_TIMEZONE || "America/Argentina/Buenos_Aires" }, scenarios: state.scenarios ? readScenarioSnapshot(state.scenarios, totalSpecies) : [] };
+    };
+    syncTypeButtons(); syncValidityButtons(); syncCategories();
+    bindOperationalLocationControls(state, state.filters, controls, render, syncCategories);
+    $("#analysisTypeButtons").addEventListener("click", (event) => { const type = event.target?.closest?.("[data-producer-type]")?.dataset.producerType; if (!type) return; if (type === "all") state.selectedTypes = new Set(["ganadero", "mixto", "agricola"]); else if (state.selectedTypes.has(type)) { if (state.selectedTypes.size > 1) state.selectedTypes.delete(type); } else state.selectedTypes.add(type); render(); });
+    $("#analysisValidityButtons").addEventListener("click", (event) => { const validity = event.target?.closest?.("[data-renspa-validity]")?.dataset.renspaValidity; if (validity) { state.renspaValidityFilter = validity; render(); } });
+    $("#analysisCategorySelect").addEventListener("change", (event) => { state.category = event.target.value; render(); });
+    ["#analysisMinStock", "#analysisMaxStock"].forEach((selector) => $(selector).addEventListener("input", debounce(() => { const min = $("#analysisMinStock").value, max = $("#analysisMaxStock").value; if ((min && (!Number.isInteger(Number(min)) || Number(min) < 0)) || (max && (!Number.isInteger(Number(max)) || Number(max) < 0)) || (min && max && Number(min) > Number(max))) return; state.minStock = min === "" ? null : Number(min); state.maxStock = max === "" ? null : Number(max); render(); }, 200)));
+    [controls.level, controls.metric, controls.detailSearch, $("#analysisValidityLevel")].forEach((control) => control.addEventListener(control === controls.detailSearch ? "input" : "change", render));
+    $("#resetAnalysisFilters")?.addEventListener("click", () => { Object.assign(state.filters, { species: "all", department: "all", municipality: "", office: "" }); state.selectedTypes = new Set(["ganadero", "mixto", "agricola"]); state.renspaValidityFilter = "all"; state.category = ""; state.minStock = null; state.maxStock = null; state.activePolygon = null; $("#analysisMinStock").value = ""; $("#analysisMaxStock").value = ""; controls.level.value = "department"; controls.metric.value = "stock"; controls.detailSearch.value = ""; setText("#analysisPolygonStatus", "Polígono del mapa: ninguno"); render(); });
+    state.scenarios = setupScenario(() => { if (state.snapshot) state.snapshot.scenarios = readScenarioSnapshot(state.scenarios, state.snapshot.totalSpecies); });
+    $("#downloadSummaryButton")?.addEventListener("click", () => downloadSummary(state.snapshot));
+    render();
+  }
+
+  function aggregateInternalGrids(producers) {
+    const groups = new Map();
+    for (const item of producers) {
+      if (!validCoordinatePair(item.lat, item.lon)) continue;
+      const key = `${item.departamento}|${item.municipio}|${Math.floor(item.lat / .12)}|${Math.floor(item.lon / .12)}`;
+      if (!groups.has(key)) groups.set(key, { departamento: item.departamento, municipio: item.municipio, registros: 0, all: 0, ...Object.fromEntries(SPECIES.map(([species]) => [species, 0])) });
+      const group = groups.get(key); group.registros += 1; group.all += item.totalExistencias; SPECIES.forEach(([species]) => { group[species] += speciesValue(item, species); });
+    }
+    return [...groups.values()];
+  }
+
+  function renderInternalValidityComparison(producers, level) {
+    const groups = new Map();
+    for (const item of producers) {
+      const label = level === "type" ? producerTypeLabel(item.tipoRenspa) : level === "office" ? item.oficinaLocal || "Sin oficina" : level === "municipality" ? `${item.departamento || "Sin departamento"} · ${item.municipio || "Sin municipio"}` : item.departamento || "Sin departamento";
+      if (!groups.has(label)) groups.set(label, { total: 0, vigente: 0 });
+      const group = groups.get(label); group.total += 1; if (getRenspaValidity(item).status === "vigente") group.vigente += 1;
+    }
+    const rows = [...groups.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 30);
+    $("#analysisValidityRows").innerHTML = rows.length ? rows.map(([label, group]) => `<div class="analysis-validity-row"><span>${escapeHtml(titleCase(label))}</span><strong>${formatNumber.format(group.vigente)} vigentes</strong><span>${formatNumber.format(group.total - group.vigente)} no vigentes</span><em>${formatDecimal.format(group.vigente / group.total * 100)}%</em></div>`).join("") : "Sin RENSPA para los filtros seleccionados.";
   }
 
   function renderAnalysisCards(totalAnimals, totalSpecies, records, species) {
@@ -2223,10 +2398,35 @@
   function downloadSummary(snapshot) {
     if (!snapshot) return;
     const metadata = snapshot.data?.metadata || {};
+    const scope = snapshot.internalScope;
+    const internalFilters = scope ? [
+      ["Tipo RENSPA", scope.types.map(producerTypeLabel).join(" + ")],
+      ["Vigencia", validityFilterLabel(scope.validityFilter)],
+      ["Especie", speciesLabel(snapshot.species)],
+      ["Departamento", snapshot.filters.department === "all" ? "Toda la provincia" : titleCase(snapshot.filters.department)],
+      ["Municipio", snapshot.filters.municipality ? titleCase(snapshot.filters.municipality) : "Todos"],
+      ["Oficina local", snapshot.filters.office ? titleCase(snapshot.filters.office) : "Todas"],
+      ["Categoría", scope.category ? PRODUCER_CATEGORY_LABELS[scope.category] || scope.category : "Todas"],
+      ["Rango de existencias", `${scope.minStock ?? 0}–${scope.maxStock ?? "∞"}`],
+      ["Rango aplicado a", scope.category ? PRODUCER_CATEGORY_LABELS[scope.category] || scope.category : speciesLabel(snapshot.species)],
+      ["Polígono", scope.polygonActive ? "Activo" : "Ninguno"],
+    ] : [];
     const rows = [
       ["Campo", "Valor"],
-      ["Filtros activos", filterSummary(snapshot.filters, snapshot.rows.length, snapshot.records)],
-      ["Fecha de corte", metadata.fecha_corte || metadata.fechaCorte || metadata.corte || metadata.periodo || "Fecha de corte no informada"],
+      ["Filtros activos", scope ? `${internalFilters.map(([label, entry]) => `${label}: ${entry}`).join(" · ")} · ${formatNumber.format(snapshot.records)} RENSPA filtrados` : filterSummary(snapshot.filters, snapshot.rows.length, snapshot.records)],
+      ...internalFilters,
+      ...(scope ? [
+        ["Fuente interna", scope.sourceFile],
+        ["RENSPA en la fuente interna", scope.sourceRecords],
+        ["RENSPA filtrados", snapshot.validity.total],
+        ["RENSPA vigentes filtrados", snapshot.validity.vigente],
+        ["RENSPA no vigentes filtrados", snapshot.validity.noVigente],
+        ["Porcentaje de RENSPA vigentes filtrados", snapshot.validity.total ? snapshot.validity.vigente / snapshot.validity.total * 100 : 0],
+        ["Fecha de referencia de vigencia", scope.referenceDate],
+        ["Ventana de vigencia (días, inclusiva)", scope.validityDays],
+        ["Zona horaria de vigencia", scope.validityTimezone],
+      ] : []),
+      ["Fecha de corte", scope ? "Fecha de corte no informada" : metadata.fecha_corte || metadata.fechaCorte || metadata.corte || metadata.periodo || "Fecha de corte no informada"],
       ["Fecha de descarga", new Date().toISOString()],
       ["Existencias totales filtradas", snapshot.totalAnimals],
       [`Existencias ${speciesLabel(snapshot.species)}`, snapshot.totalSpecies],
@@ -2379,8 +2579,8 @@
       const municipality = row.municipio || row.nombre || "Sin municipio";
       const office = row.oficina || "Sin oficina";
       const key = level === "department" ? row.departamento : level === "municipality" ? `${row.departamento}|${municipality}` : `${row.departamento}|${municipality}|${office}`;
-      if (!groups.has(key)) groups.set(key, { nombre: level === "department" ? row.departamento : level === "municipality" ? municipality : office, departamento: row.departamento || "", municipio: municipality, oficina: level === "office" ? office : "", registros: 0, bovinos: 0, bubalinos: 0, equinos: 0, porcinos: 0, caprinos: 0, ovinos: 0 });
-      const target = groups.get(key); target.registros += value(row, "registros"); SPECIES.forEach(([species]) => { target[species] += value(row, species); });
+      if (!groups.has(key)) groups.set(key, { nombre: level === "department" ? row.departamento : level === "municipality" ? municipality : office, departamento: row.departamento || "", municipio: municipality, oficina: level === "office" ? office : "", registros: 0, all: 0, bovinos: 0, bubalinos: 0, equinos: 0, porcinos: 0, caprinos: 0, ovinos: 0 });
+      const target = groups.get(key); target.registros += value(row, "registros"); target.all += value(row, "all"); SPECIES.forEach(([species]) => { target[species] += value(row, species); });
     });
     return [...groups.values()];
   }

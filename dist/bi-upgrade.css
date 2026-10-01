@@ -212,3 +212,17 @@ tbody tr:hover{background:rgba(60,167,159,.045)}
   .senasa-public-badge{max-width:142px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .operational-active .map-controls-extended{grid-template-columns:1fr}
 }
+.analysis-internal-extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-top: 14px;
+}
+.analysis-internal-extra[hidden], .analysis-validity-metrics[hidden], #analysisValidityComparison[hidden] { display: none; }
+.analysis-internal-extra label { display: grid; gap: 5px; min-width: 150px; }
+.analysis-internal-extra input, .analysis-internal-extra select { min-height: 36px; }
+.analysis-validity-rows { display: grid; gap: 10px; padding: 16px 20px 20px; }
+.analysis-validity-row { display: grid; grid-template-columns: minmax(120px, 1fr) 120px 120px 75px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+.analysis-validity-row strong { color: #115e59; }
+@media (max-width: 640px) { .analysis-validity-row { grid-template-columns: minmax(100px, 1fr) 65px 65px; } .analysis-validity-row em { display: none; } }

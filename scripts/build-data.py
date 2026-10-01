@@ -99,6 +99,10 @@ def main():
     records = 0
 
     for row in (row for sheet in sheets for row in sheet.iter_rows(min_row=2, values_only=True)):
+        # The Mixto worksheet contains styled but entirely empty trailing rows.
+        # They are not producers and must not enter public aggregates.
+        if not any(value not in (None, "") for value in row):
+            continue
         records += 1
         department = clean_text(row[columns[department_field]])
         municipality = clean_text(row[columns[municipality_field]])

@@ -1,12 +1,14 @@
 // Plantilla para un despliegue protegido. No copiar este archivo a GitHub Pages.
 window.APP_CONFIG = {
   APP_MODE: "internal",
-  DATA_URL: "./data/senasa-corrientes.json?v=20260923",
-  METADATA_URL: "./data/metadata.json?v=20260923",
+  RENSPA_VALIDITY_DAYS: 365,
+  RENSPA_VALIDITY_TIMEZONE: "America/Argentina/Buenos_Aires",
+  DATA_URL: "./data/senasa-corrientes.json?v=20261001",
+  METADATA_URL: "./data/metadata.json?v=20261001",
   SECURE_LOCATOR_ENDPOINT: null,
   MIN_RECORDS_PUBLIC_CELL: 5,
   PROVINCE: "Corrientes",
-  DASHBOARD_UPDATED: "2026-09-23T13:04:21Z",
+  DASHBOARD_UPDATED: "2026-10-01T12:35:44Z",
   SHOW_INTERNAL_QUALITY_PANEL: false,
   INTERNAL_MODE: true,
   PUBLIC_SAFE_MODE: false,

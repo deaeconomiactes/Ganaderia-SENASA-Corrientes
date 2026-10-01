@@ -14,7 +14,7 @@ Este documento describe el flujo recomendado para entregar el mapa operativo a u
 Desde la raíz `senasa-dashboard/`, el administrador coloca la fuente original en una ubicación local ignorada y ejecuta:
 
 ```powershell
-node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"
+node scripts/build-producer-data.mjs "./data/interno/SENASA_Ctes.xlsx"
 node scripts/build-internal-dist.mjs
 ```
 

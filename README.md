@@ -17,16 +17,17 @@ El repositorio mantiene dos plantillas separadas. GitHub Pages siempre genera `d
 
 ## Fuente y alcance
 
-- Fuente declarada: `SENASA 09_26 agricolas ganaderos y mixtos.xlsx`.
+- Fuente actual del pipeline interno: `SENASA_Ctes.xlsx`.
 - El artefacto público es `dist/data/senasa-corrientes.json`, generado con agregación territorial.
-- Se regenera con `python scripts/build-data.py "data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx" "dist/data/senasa-corrientes.json"`; el script actualiza también `dist/data/metadata.json`.
+- La integración de código no incluye los cambios regenerados de `dist/config.js`, `dist/data/metadata.json` ni `dist/data/senasa-corrientes.json`. El snapshot público versionado conserva su fuente y metadatos anteriores hasta una publicación separada de los agregados.
+- Se regenera con `python scripts/build-data.py "data/interno/SENASA_Ctes.xlsx" "dist/data/senasa-corrientes.json"`; el script actualiza también `dist/data/metadata.json`.
 - Niveles: provincia, departamento, municipio/oficina local y grilla aproximada de 0,12°.
 - Umbral público vigente: mínimo de 5 registros por unidad publicada. Las unidades menores se suprimen durante la generación del JSON.
 - Los totales/KPIs públicos se calculan sobre las unidades publicadas después de la supresión; no permiten inferir existencias suprimidas.
 - La fuente no informa fecha de corte; el tablero lo muestra como advertencia y no infiere evolución temporal.
 - La fecha de actualización del dashboard se mantiene explícita en `dist/config.js`, separada de la fecha de actualización de la fuente.
 
-La auditoría de `SENASA 09_26 agricolas ganaderos y mixtos.xlsx` cuenta 67.574 filas y 67.570 RENSPA únicos: Agrícola 9.695, Ganadero 52.011 y Mixto 5.864. Hay cuatro filas con RENSPA repetido dentro de su hoja y 106 filas sin coordenadas utilizables para el mapa. La fuente contiene identificadores, titularidad, documentos, contactos y coordenadas; por eso no se copia al build público ni al repositorio. Las cuatro filas repetidas se conservan para revisión; el KPI de RENSPA visibles cuenta claves distintas, mientras el mapa muestra las filas georreferenciadas.
+La auditoría de `SENASA_Ctes.xlsx` al 01/10/2026 cuenta 65.499 registros válidos: 5.405 vigentes y 60.094 no vigentes, sin fechas faltantes ni futuras. El archivo tiene 2.163 filas completamente vacías al final de Mixto, que se omiten. La salida agregada regenerada localmente contiene 65.185 registros tras suprimir celdas con menos de 5; esa diferencia no representa exclusiones del artefacto interno. Esa salida generada no forma parte de la integración de código. La fuente contiene identificadores, titularidad, documentos, contactos y coordenadas; por eso no se copia al build público ni al repositorio.
 
 ## Capas cartográficas y lectura del mapa
 
@@ -45,6 +46,10 @@ El repositorio y GitHub Pages no deben contener el XLSX original, RENSPA, DNI, C
 
 ## Modo interno operativo
 
+La vigencia es dinámica y se calcula al abrir el dashboard con la fecha calendario de `America/Argentina/Buenos_Aires`. Una actualización de hace 365 días exactos sigue vigente; más de 365 días o una fecha ausente/inválida es **Activo no vigente**. Una fecha futura conserva el registro como **Activo vigente** y se reporta como anomalía. Todos los RENSPA se consideran activos. Los índices en memoria cruzan tipo y vigencia antes de especie, territorio, rango y polígono. La vista Análisis incluye KPIs y comparación de vigencia por departamento, municipio, oficina y tipo.
+
+El resumen CSV de Análisis interno documenta esos mismos filtros, la población de la fuente y la población filtrada, los conteos de vigencia y su fecha de referencia. El porcentaje de vigentes usa como denominador la población filtrada. El archivo no exporta identificadores individuales ni la geometría del polígono, y no atribuye la fecha de corte del agregado público a la fuente interna.
+
 El mapa operativo usa Leaflet y representa unidades productivas como puntos, con clusters inspectables, filtro principal multiselección por tipo de RENSPA y filtros por especie ganadera/departamento/municipio/oficina y un bloque avanzado (categoría y rango de existencias). Los productores con total declarado igual a cero y coordenadas válidas aparecen en el mapa, incluso cuando se selecciona una especie; se distinguen mediante un marcador gris con «0». Una categoría seleccionada o un mínimo de existencias mayor que cero puede excluirlos. El rango se aplica a la categoría seleccionada cuando corresponde; en su defecto, a la especie activa, y sólo usa el total general cuando no hay especie seleccionada. Todos los flujos llaman a `selectProducer()`; la capa `selectedProducerLayer` queda por encima de clusters y puntos normales, centra el mapa, abre el popup y actualiza la ficha. El ranking, el localizador interno y los puntos del mapa comparten la misma selección: al seleccionar una fila se centra el mapa, se resalta el marcador y se abre la ficha desagregada. El control propio **Mapa / Satélite** alterna entre OpenStreetMap y Esri World Imagery, preserva el estado de Leaflet y recuerda la elección como `senasaBasemap` en el almacenamiento local cuando está disponible. La base pública no contiene esos registros; el artefacto interno se configura una sola vez por el administrador y el jefe sólo recibe el enlace protegido.
 
 Para probar una copia local controlada, el administrador ejecuta `node scripts/build-producer-data.mjs` y luego `node scripts/build-internal-dist.mjs`, y sirve `internal-dist/`. Esto no debe hacerse sobre el artefacto que se subirá a GitHub Pages. Las coordenadas co-localizadas deben validarse y agruparse antes de uso operativo; no se afirma que sean precisión predial sin metadata de origen.
@@ -55,10 +60,10 @@ El contrato de normalización acepta un array o `{ "records": [...] }` y detecta
 
 ## Pipeline local de productores
 
-La base actual debe colocarse en `data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx`, una ruta ignorada por Git. El transformador no imprime filas ni identificadores; genera el archivo que consume el artefacto interno y un reporte local:
+La base actual debe colocarse en `data/interno/SENASA_Ctes.xlsx`, una ruta ignorada por Git. El transformador no imprime filas ni identificadores; genera el archivo que consume el artefacto interno y un reporte local:
 
 ```powershell
-node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"
+node scripts/build-producer-data.mjs "./data/interno/SENASA_Ctes.xlsx"
 ```
 
 Salidas predeterminadas:
@@ -96,7 +101,7 @@ Todas las rutas del sitio son relativas (`./data`, `./config.js`, `./app.js`), p
 
 ## Despliegue interno protegido
 
-1. Generar `productores.json` y `reporte_productores.json` en una máquina administrativa con `node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"`.
+1. Generar `productores.json` y `reporte_productores.json` en una máquina administrativa con `node scripts/build-producer-data.mjs "./data/interno/SENASA_Ctes.xlsx"`.
 2. Ejecutar `node scripts/build-internal-dist.mjs` (o `npm run build:internal`) para crear `internal-dist/`. La carpeta contiene `config.js` interno, la aplicación, Leaflet, un índice liviano fragmentado para mapa/filtros, detalle fragmentado bajo demanda y un índice protegido de búsqueda; está excluida de Git.
 3. Publicar **sólo `internal-dist/`** en Vercel, Netlify o un servidor institucional con autenticación/RBAC. Las instrucciones completas de protección están en [`DEPLOY_INTERNAL.md`](./DEPLOY_INTERNAL.md).
 4. Si se usa una API, pasar `--data-url` y `--locator-endpoint` al generador. Nunca subir el XLSX original, el JSON interno ni `internal-dist/` al repositorio público.

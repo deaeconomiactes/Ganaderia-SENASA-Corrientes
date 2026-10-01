@@ -6,4 +6,4 @@ El mapa interno usa un manifest protegido con fragmentos de índice cartográfic
 
 No copiar aquí el XLSX original ni incluir esta carpeta en GitHub Pages. Un flag JavaScript no protege datos si el archivo se publica como estático; para compartir el modo interno se requiere autenticación, una red privada o un backend seguro que devuelva sólo la información autorizada.
 
-Para generar la base interna use `node scripts/build-producer-data.mjs "./data/interno/SENASA 09_26 agricolas ganaderos y mixtos.xlsx"`. El script crea `data/interno/productores.json` y `data/interno/reporte_productores.json`; ambos están ignorados por Git.
+Para generar la base interna use `node scripts/build-producer-data.mjs "./data/interno/SENASA_Ctes.xlsx"`. El script crea `data/interno/productores.json` y `data/interno/reporte_productores.json`; ambos están ignorados por Git.

@@ -72,3 +72,22 @@
 .producer-type-badge{display:inline-flex;align-items:center;width:max-content;margin:4px 0;padding:3px 8px;border-radius:999px;font-size:.65rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:#174646;color:#98eee2}
 .producer-type-badge.type-mixto{background:#4a3820;color:#f4cc80}
 .producer-type-badge.type-agricola{background:#244333;color:#a7e3af}
+.renspa-validity-control .producer-type-buttons button[aria-pressed="true"] {
+  border-color: #0f766e;
+  background: #d9f5ef;
+  color: #115e59;
+}
+.renspa-validity-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.renspa-validity-badge.vigente { background: #d9f5ef; color: #115e59; }
+.renspa-validity-badge.no_vigente { background: #fff0d7; color: #92530b; }
+.renspa-validity-detail .renspa-validity-badge { margin-right: 5px; }
