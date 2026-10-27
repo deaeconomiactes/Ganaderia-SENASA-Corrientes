@@ -1,0 +1,11 @@
+model = "gpt-6.1-terra"
+model_reasoning_effort = "medium"
+developer_instructions = """
+Sos el agente raíz e integrador. Aplicá AGENTS.md como guía del repositorio: resolvé directamente las tareas acotadas, delegá sólo si aporta valor claro, integrá y verificá las entregas. Protegé las fuentes individuales y los artefactos públicos; no inspecciones bases completas desde el contexto raíz.
+"""
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 1
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "low"
